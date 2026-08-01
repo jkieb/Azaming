@@ -8,11 +8,6 @@ on:
       url:
         description: Page to probe
         default: https://www.derislam.at/gebetszeiten
-  push:
-    branches: [claude/azan-webapp-wien-deploy-pojkho]
-    paths:
-      - scripts/discover.mjs
-      - .github/workflows/discover-source.yml
 
 jobs:
   discover:

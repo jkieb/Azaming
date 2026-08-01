@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Azan web app for Vienna with prayer times from IGGOe (derislam.at)",
   "scripts": {
-    "discover": "node scripts/discover.mjs"
+    "discover": "node scripts/discover.mjs",
+    "fetch": "node scripts/fetch-times.mjs",
+    "test": "node --test scripts/*.test.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.0"

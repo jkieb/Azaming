@@ -1,0 +1,103 @@
+name: Update prayer times
+
+# Pulls a rolling window of months from the IGGOe API on the 1st. Fetching
+# ahead means a failed run does not take the app down - there is still data on
+# disk for the following months while the failure gets fixed.
+on:
+  schedule:
+    - cron: '0 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      months_ahead:
+        description: How many months to fetch
+        default: '3'
+  push:
+    branches: [claude/azan-webapp-wien-deploy-pojkho]
+    paths:
+      - scripts/fetch-times.mjs
+      - .github/workflows/update-times.yml
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PLACE: Wien
+      MONTHS_AHEAD: ${{ inputs.months_ahead || '3' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test
+        run: npm test
+
+      - name: Fetch
+        id: fetch
+        continue-on-error: true
+        run: node scripts/fetch-times.mjs
+
+      # The API is served to the site's own frontend, so if it ever starts
+      # rejecting plain clients we can still get the same JSON from a browser.
+      - name: Fetch (browser fallback)
+        if: steps.fetch.outcome == 'failure'
+        id: fetch_browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          node scripts/fetch-times.mjs --browser
+
+      - name: Commit
+        if: steps.fetch.outcome == 'success' || steps.fetch_browser.outcome == 'success'
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/data
+          if git diff --cached --quiet; then
+            echo "prayer times unchanged"
+            exit 0
+          fi
+          git commit -m "chore(data): refresh prayer times for $PLACE"
+          for delay in 0 2 4 8 16; do
+            sleep $delay
+            git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && exit 0
+          done
+          exit 1
+
+      # Without this a broken source is invisible until the buffer runs out.
+      - name: Report failure
+        if: steps.fetch.outcome == 'failure' && steps.fetch_browser.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create prayer-times --color d73a4a \
+            --description 'Prayer time data pipeline' 2>/dev/null || true
+
+          # One open issue is enough - do not file a new one every month.
+          if [ "$(gh issue list --label prayer-times --state open --json number --jq length)" != "0" ]; then
+            echo "an open prayer-times issue already exists"
+            exit 1
+          fi
+
+          gh issue create \
+            --title "Prayer time update failed ($(date -u +%Y-%m-%d))" \
+            --label prayer-times \
+            --body "$(cat <<'BODY'
+          The monthly fetch from the IGGOe API failed.
+
+          Existing data on disk is untouched, so the app keeps working until the
+          buffered months run out. Common causes: the API schema changed (see
+          `FIELD_ALIASES` in `scripts/fetch-times.mjs`), or validation rejected
+          the payload.
+          BODY
+          )
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          exit 1
