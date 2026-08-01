@@ -3,3 +3,4 @@ out/
 dist/
 package-lock.json
 fetch.log
+shot-*.png

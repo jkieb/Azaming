@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Azaming — Gebetszeiten Wien</title>
+    <meta name="description" content="Gebetszeiten für Wien nach IGGÖ, mit Azan zur Gebetszeit." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#0d1b1a" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!--
+      Audio cannot start without a user gesture, and a wall display is set up
+      once and then left alone - so this is a blocking gate rather than a
+      dismissible hint. Everything behind it is inert until audio is unlocked.
+    -->
+    <div id="gate" class="gate">
+      <div class="gate-inner">
+        <h1>Azaming</h1>
+        <p>Gebetszeiten für Wien nach IGGÖ</p>
+        <button id="enable" class="enable" type="button">Azan aktivieren</button>
+        <p class="gate-note">
+          Browser erlauben Ton erst nach einem Klick. Danach bleibt dieser Tab
+          offen — im Hintergrund oder bei gesperrtem Bildschirm spielt kein Ton.
+        </p>
+      </div>
+    </div>
+
+    <main id="app" class="app" hidden>
+      <header class="head">
+        <div class="head-left">
+          <div id="clock" class="clock">--:--<span id="seconds" class="seconds">:--</span></div>
+          <div id="date" class="date"></div>
+          <div id="hijri" class="hijri"></div>
+        </div>
+        <div class="head-right">
+          <div class="next-label">Nächstes Gebet</div>
+          <div id="next-name" class="next-name">—</div>
+          <div id="countdown" class="countdown">--:--:--</div>
+        </div>
+      </header>
+
+      <section id="times" class="times" aria-label="Gebetszeiten heute"></section>
+
+      <footer class="foot">
+        <div id="status" class="status"></div>
+        <div class="controls">
+          <button id="test" class="btn" type="button">Azan testen</button>
+          <button id="settings-toggle" class="btn" type="button" aria-expanded="false">
+            Einstellungen
+          </button>
+        </div>
+      </footer>
+
+      <div id="settings" class="settings" hidden>
+        <fieldset>
+          <legend>Azan abspielen bei</legend>
+          <div id="prayer-toggles" class="toggles"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Lautstärke</legend>
+          <input id="volume" type="range" min="0" max="100" step="5" />
+          <output id="volume-out"></output>
+        </fieldset>
+        <fieldset>
+          <legend>Bildschirm</legend>
+          <label class="toggle">
+            <input id="wakelock" type="checkbox" />
+            <span>Bildschirm wach halten</span>
+          </label>
+        </fieldset>
+      </div>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "Azaming — Gebetszeiten Wien",
+  "short_name": "Azaming",
+  "description": "Gebetszeiten für Wien nach IGGÖ, mit Azan zur Gebetszeit.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0b1413",
+  "theme_color": "#0d1b1a",
+  "lang": "de-AT",
+  "icons": []
+}

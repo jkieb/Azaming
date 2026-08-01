@@ -2,6 +2,38 @@
 
 An Azan app, with every new prayer time a small Muazin audio starting.
 
+Prayer times for Vienna, shown on a screen that stays on, with the adhan
+played at each prayer. `public/` is a static site with no build step — what is
+in the repository is what ships.
+
+## The app
+
+Built for a browser tab left open on a wall display, which is what makes full
+audio dependable: browsers only play sound in a foreground tab after a user
+gesture, so the page opens on a one-time **Azan aktivieren** gate and runs from
+there. On a phone with the screen locked no web app can play a full adhan; that
+needs a native wrapper, which this is not.
+
+- Clock, Gregorian and Hijri date, the day's six times, and a countdown to the
+  next prayer
+- Adhan at each prayer, per-prayer on/off, volume, and a test button
+- Screen Wake Lock so the display does not sleep
+- Works offline through a service worker once loaded
+
+Times are handled in Europe/Vienna wall-clock seconds rather than `Date`
+objects, so the adhan fires at the right moment regardless of how the display
+machine's own timezone is set.
+
+**Audio files are not in the repository.** See
+[`public/audio/README.md`](public/audio/README.md) — until you add one, every
+prayer is announced with a synthesised chime and the status bar says so.
+
+### Deployment
+
+`.github/workflows/deploy.yml` publishes `public/` to GitHub Pages on every
+change, including the monthly data commit. Set *Settings → Pages → Source* to
+**GitHub Actions** once; there is nothing else to configure.
+
 ## Prayer time data
 
 Times come from the IGGÖ (Islamische Glaubensgemeinschaft in Österreich) via
@@ -72,8 +104,13 @@ same request from a real Chromium.
 | Command | Purpose |
 | --- | --- |
 | `npm test` | Validation rules for the fetched data |
+| `npm run smoke` | Drives the page in a browser on a controlled clock |
+| `npm run serve` | Serve `public/` locally |
 | `npm run fetch` | Pull months into `public/data/` (`--browser` to force Chromium) |
 | `node scripts/probe-api.mjs` | Which transports and query shapes the API accepts |
 | `npm run discover` | Re-inspect derislam.at if the API ever moves |
+
+`npm run smoke` fast-forwards a virtual clock to a prayer time and asserts the
+adhan fires — set `CHROMIUM_PATH` to reuse a Chromium you already have.
 
 `PLACE` and `MONTHS_AHEAD` configure the fetch; they default to `Wien` and `3`.
