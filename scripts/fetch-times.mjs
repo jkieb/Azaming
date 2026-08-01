@@ -63,22 +63,38 @@ function apiUrl(year, month) {
  * Identifying honestly is what gets through (verified by scripts/probe-api.mjs),
  * so do not add accept-language or a browser user-agent here.
  */
-async function getJson(url) {
-  const res = await fetch(url, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'Azaming/1.0 (+https://github.com/jkieb/Azaming)',
-      referer: 'https://www.derislam.at/gebetszeiten',
-    },
-  });
-  if (!res.ok) {
+const API_HEADERS = {
+  accept: 'application/json',
+  'user-agent': 'Azaming/1.0 (+https://github.com/jkieb/Azaming)',
+  referer: 'https://www.derislam.at/gebetszeiten',
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Cloudflare tends to challenge the first request on a cold connection and let
+ * later ones through unchanged - the same URL and headers that fail here
+ * return 200 once the client has been talking to the host for a moment. So a
+ * single 403 says nothing; only a run of them means we are actually refused.
+ */
+async function getJson(url, attempts = 3) {
+  let last;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const res = await fetch(url, { headers: API_HEADERS });
+    if (res.ok) return res.json();
+
     const body = await res.text().catch(() => '');
-    throw new FetchError(
-      `HTTP ${res.status} for ${url}` +
-        (/just a moment/i.test(body) ? ' - blocked by a Cloudflare challenge' : ''),
+    const challenged = /just a moment/i.test(body);
+    last = new FetchError(
+      `HTTP ${res.status} for ${url}` + (challenged ? ' - blocked by a Cloudflare challenge' : ''),
     );
+
+    if (attempt < attempts) {
+      console.log(`  attempt ${attempt}/${attempts}: HTTP ${res.status}${challenged ? ' (challenge)' : ''}, retrying`);
+      await sleep(1500 * attempt);
+    }
   }
-  return res.json();
+  throw last;
 }
 
 /** Fallback path: issue the same request from inside a real browser context. */
