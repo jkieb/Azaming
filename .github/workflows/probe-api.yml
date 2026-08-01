@@ -1,0 +1,21 @@
+name: Probe API transport
+
+# Diagnostic: which HTTP transport does the Directus API accept? Decides
+# whether the monthly job needs the 300 MB Chromium fallback or not.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/azan-webapp-wien-deploy-pojkho]
+    paths:
+      - scripts/probe-api.mjs
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/probe-api.mjs
