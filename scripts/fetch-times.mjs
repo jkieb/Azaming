@@ -56,16 +56,28 @@ function apiUrl(year, month) {
   return `${API}?${qs}`;
 }
 
+/**
+ * The API sits behind Cloudflare, which challenges requests that *claim* to be
+ * a browser - a spoofed Chrome user-agent gets a 403 because the TLS
+ * fingerprint gives it away, and so does any set of browser-ish headers.
+ * Identifying honestly is what gets through (verified by scripts/probe-api.mjs),
+ * so do not add accept-language or a browser user-agent here.
+ */
 async function getJson(url) {
   const res = await fetch(url, {
     headers: {
       accept: 'application/json',
-      'accept-language': 'de-AT,de;q=0.9',
       'user-agent': 'Azaming/1.0 (+https://github.com/jkieb/Azaming)',
       referer: 'https://www.derislam.at/gebetszeiten',
     },
   });
-  if (!res.ok) throw new FetchError(`HTTP ${res.status} for ${url}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new FetchError(
+      `HTTP ${res.status} for ${url}` +
+        (/just a moment/i.test(body) ? ' - blocked by a Cloudflare challenge' : ''),
+    );
+  }
   return res.json();
 }
 
