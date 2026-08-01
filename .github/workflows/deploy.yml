@@ -3,9 +3,13 @@ name: Deploy to Pages
 # public/ is served as-is - no build step, so what is in the repo is exactly
 # what ships. Runs after a data refresh too, so the monthly commit reaches the
 # live display without a manual deploy.
+#
+# The github-pages environment only accepts deployments from branches its
+# protection rules allow, which by default means the default branch - so this
+# has to include main, or merging the pull request would deploy nothing.
 on:
   push:
-    branches: [claude/azan-webapp-wien-deploy-pojkho]
+    branches: [main, claude/azan-webapp-wien-deploy-pojkho]
     paths:
       - public/**
       - .github/workflows/deploy.yml
