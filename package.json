@@ -1,0 +1,13 @@
+{
+  "name": "azaming",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Azan web app for Vienna with prayer times from IGGOe (derislam.at)",
+  "scripts": {
+    "discover": "node scripts/discover.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
