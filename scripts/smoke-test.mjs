@@ -1,10 +1,14 @@
 /**
  * Drives the real page in a browser against the committed data.
  *
- * The two things worth proving cannot be checked by reading the code: that the
+ * The things worth proving cannot be checked by reading the code: that the
  * countdown is computed in Vienna time regardless of the machine's timezone,
- * and that the adhan actually fires when the clock reaches a prayer time.
- * Both are done with a controlled clock, so the test does not wait for 13:06.
+ * and that the adhan actually fires when the clock reaches a prayer time. All
+ * of it runs on a controlled clock, so the test does not wait for 13:06.
+ *
+ * The second half covers the ways a display goes quiet in the field rather than
+ * on a desk - a tick that arrives late, a suspended audio context, and a month
+ * that was not loaded at startup - each of which used to fail silently.
  */
 
 import { createServer } from 'node:http';
@@ -57,10 +61,66 @@ const context = await browser.newContext({
   timezoneId: 'America/New_York',
   locale: 'de-AT',
 });
+// Records what actually reaches the speakers: a source started into a
+// suspended context makes no sound, which is not visible from the page.
+const spy = () => {
+  window.__starts = [];
+  const Real = window.AudioContext;
+  window.AudioContext = class extends Real {
+    constructor(...args) {
+      super(...args);
+      window.__ctx = this;
+    }
+    createBufferSource() {
+      const node = super.createBufferSource();
+      const start = node.start.bind(node);
+      node.start = (...args) => {
+        window.__starts.push({ state: this.state, seconds: node.buffer?.duration ?? 0 });
+        return start(...args);
+      };
+      return node;
+    }
+  };
+};
+
+// Only the adhan counts; the unlock blip is a zero-length buffer.
+const audible = (page) =>
+  page.evaluate(() => window.__starts.filter((s) => s.state === 'running' && s.seconds > 1).length);
+
+/**
+ * Advances the virtual clock a tick at a time, leaving real time in between for
+ * the fetches and the audio resume the app awaits - neither of which is driven
+ * by the virtual clock.
+ */
+async function settle(p, ticks = 4) {
+  for (let i = 0; i < ticks; i += 1) {
+    await p.clock.runFor(1100);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/** A fresh display, opened at `time`, past the audio gate. */
+async function open(time) {
+  const ctx = await browser.newContext({ timezoneId: 'America/New_York', locale: 'de-AT' });
+  const p = await ctx.newPage();
+  await p.addInitScript(spy);
+  await p.clock.install({ time: new Date(time) });
+  await p.goto(base);
+  await p.getByRole('button', { name: 'Azan aktivieren' }).click();
+  await p.waitForSelector('#times .slot');
+  await p.clock.runFor(1000);
+  // Startup awaits real network promises, so the first paint does not land at a
+  // point virtual time can predict. Wait for it, or assertions race it.
+  await p.waitForFunction(() => !document.getElementById('clock').textContent.startsWith('-'));
+  return { page: p, context: ctx };
+}
+
 const page = await context.newPage();
 
 const errors = [];
 page.on('pageerror', (err) => errors.push(err.message));
+
+await page.addInitScript(spy);
 
 // 2026-08-01 13:05:55 Vienna (UTC+2) - five seconds before Duhr at 13:06.
 await page.clock.install({ time: new Date('2026-08-01T11:05:55Z') });
@@ -70,8 +130,6 @@ await page.getByRole('button', { name: 'Azan aktivieren' }).click();
 await page.waitForSelector('#times .slot');
 await page.clock.runFor(1000);
 
-// Startup awaits real network promises, so the first paint does not land at a
-// point virtual time can predict. Wait for it, or the first assertion races it.
 await page.waitForFunction(() => !document.getElementById('clock').textContent.startsWith('-'));
 
 const clock = await page.textContent('#clock');
@@ -87,9 +145,24 @@ check('countdown counts down to Duhr', /^00:00:0[0-9]$/.test(countdown), countdo
 
 check('Duhr is highlighted as next', await dhuhr.evaluate((n) => n.classList.contains('is-next')));
 
-// Cross the prayer time.
+// Cross the prayer time. Playback resolves through a promise, so the highlight
+// lands a tick after the virtual clock moves.
+const fired = async (p, nth) => {
+  try {
+    await p.waitForFunction(
+      (i) => document.querySelectorAll('.slot')[i].classList.contains('is-firing'),
+      nth,
+      { timeout: 2000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 await page.clock.runFor(6000);
-check('adhan fires at the prayer time', await dhuhr.evaluate((n) => n.classList.contains('is-firing')));
+check('adhan fires at the prayer time', await fired(page, 2));
+check('and is actually audible', (await audible(page)) === 1);
 
 // Decoding is what actually has to work at the prayer time - a file that the
 // browser cannot decode would otherwise only be noticed when it stays silent.
@@ -123,6 +196,65 @@ check('date rolls over to the next day', (await page.textContent('#date')).inclu
 check('next prayer after midnight is Fadjr', (await page.textContent('#next-name')) === 'Fadjr');
 
 check('no uncaught page errors', errors.length === 0, errors.join('; '));
+await context.close();
+
+// ---------------------------------------------------------------- late tick
+{
+  // A hidden tab is throttled to about one timer a minute and a sleeping
+  // display stops ticking, so no tick is guaranteed to land in the prayer
+  // minute. The adhan has to follow the interval that passed, not the tick.
+  const { page: p, context: c } = await open('2026-08-01T11:05:55Z');
+  await p.clock.setFixedTime(new Date('2026-08-01T11:07:02Z')); // 62s after Duhr
+  await p.clock.runFor(1100);
+  check('a tick that arrives a minute late still plays the adhan', await fired(p, 2));
+  check('late adhan is audible', (await audible(p)) === 1);
+  await c.close();
+}
+
+{
+  const { page: p, context: c } = await open('2026-08-01T11:05:55Z');
+  await p.clock.setFixedTime(new Date('2026-08-01T11:20:00Z')); // 14 minutes after
+  await p.clock.runFor(1100);
+  check('a prayer missed by more than the catch-up window is not played late', !(await fired(p, 2)));
+  await c.close();
+}
+
+// ---------------------------------------------------------------- suspended audio
+{
+  // Screen sleep, an audio device change or the OS pausing the tab suspends the
+  // context; sources started into it are silent.
+  const { page: p, context: c } = await open('2026-08-01T11:05:55Z');
+  await p.evaluate(() => window.__ctx.suspend());
+  await p.clock.runFor(6000);
+  check('suspended context still highlights the prayer', await fired(p, 2));
+  check('a suspended audio context is resumed rather than played into', (await audible(p)) === 1);
+  check('and is running again afterwards', (await p.evaluate(() => window.__ctx.state)) === 'running');
+  await c.close();
+}
+
+// ---------------------------------------------------------------- month horizon
+{
+  // Startup loads this month and the next one only. A display left running has
+  // to pick up the later months by itself.
+  const { page: p, context: c } = await open('2026-08-01T11:05:55Z');
+  await p.clock.setFixedTime(new Date('2026-10-05T10:00:00Z')); // 12:00 Vienna, 5 Oct
+  await settle(p);
+  check(
+    'a month that was not loaded at startup is fetched while running',
+    (await p.textContent('#status')).includes('Quelle'),
+    (await p.textContent('#status')).trim(),
+  );
+  check(
+    'times are shown for the later month',
+    (await p.locator('.slot').nth(2).textContent()).includes('12:48'),
+  );
+
+  // And the adhan still fires there: Duhr is 12:48 on 5 October (UTC+2).
+  await p.clock.setFixedTime(new Date('2026-10-05T10:48:05Z'));
+  await p.clock.runFor(1100);
+  check('adhan fires in a month loaded after startup', await fired(p, 2));
+  await c.close();
+}
 
 await browser.close();
 server.close();

@@ -24,6 +24,43 @@ Times are handled in Europe/Vienna wall-clock seconds rather than `Date`
 objects, so the adhan fires at the right moment regardless of how the display
 machine's own timezone is set.
 
+### When the adhan does not play
+
+The failure is always silent by nature, so the app reports the cause in the
+status bar rather than leaving it to be inferred from a missed prayer. In order
+of what to check:
+
+1. **The page is sitting on the gate.** After a reload — a browser restart, a
+   crash, a machine reboot — nothing runs until *Azan aktivieren* is clicked
+   once. That is a browser rule about sound, not something the app can work
+   around.
+2. **"Ton ist blockiert".** The `AudioContext` was suspended by screen sleep, an
+   audio device change or the OS pausing the tab. The app resumes it by itself
+   before every adhan; if the browser insists on a fresh gesture, a click
+   anywhere on the page is enough.
+3. **"Keine Daten für …".** The day is not in the loaded months. The app retries
+   the fetch every minute and recovers on its own once the month is published.
+4. **A slot says "stumm".** That prayer is switched off under *Einstellungen*.
+
+Two things that used to cause exactly this and no longer do, both covered by
+`npm run smoke`:
+
+- **A tick that never lands in the prayer minute.** A hidden tab is throttled to
+  roughly one timer a minute and a sleeping display stops ticking entirely, so
+  the adhan follows the interval that has passed since the last tick instead of
+  a tick arriving on time. A prayer noticed late still plays, up to `CATCH_UP_S`
+  (5 minutes) after its time; past that it is skipped rather than called out of
+  time.
+- **Running past the loaded data.** Startup only reads the current month and the
+  next one, so a display left running went quiet at the month after that even
+  though the file was on the server. The data is now re-read whenever the date
+  changes.
+
+One thing to know when shipping a fix: `public/sw.js` serves the app shell
+cache-first, so a display that is already running keeps the `app.js` it cached
+on its first visit. Bump `VERSION` in `sw.js` whenever a shell file changes, or
+the fix never reaches the screen it was written for.
+
 The adhan itself is `public/audio/adhan.mp3`. A separate Fajr recording is
 optional — see [`public/audio/README.md`](public/audio/README.md). With no
 recording at all the app still announces every prayer, using a synthesised

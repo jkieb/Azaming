@@ -22,8 +22,17 @@ const PRAYERS = [
 
 const AZAN_KEYS = PRAYERS.filter((p) => p.azan).map((p) => p.key);
 
-/** How long after a prayer time we still consider it "now" and play. */
+/** How long after a prayer time a slot still reads as the current prayer. */
 const FIRE_WINDOW_S = 60;
+
+/**
+ * How late the adhan may still start. A tick is not guaranteed to land in the
+ * prayer minute - a hidden tab is throttled to roughly one timer a minute, and
+ * a display that sleeps stops ticking entirely - so a prayer is played as soon
+ * as the app notices it was crossed, up to this much later. Past that the
+ * moment has passed and it is skipped rather than played out of time.
+ */
+const CATCH_UP_S = 300;
 
 const SETTINGS_KEY = 'azaming.settings.v1';
 
@@ -135,6 +144,33 @@ async function loadData() {
   }
 }
 
+let loading = false;
+let lastAttempt = 0;
+
+/**
+ * The display is meant to run for months, and startup only ever loads the
+ * current month and the one after it - so the data has to be picked up again
+ * as the clock moves on, or the app runs out of days and goes quiet while the
+ * later months sit unread on the server.
+ */
+function ensureData(now, force = false) {
+  if (loading) return;
+  if (days.has(now.date) && !force) return;
+  if (Date.now() - lastAttempt < 60_000) return;
+
+  loading = true;
+  lastAttempt = Date.now();
+  loadData()
+    .catch(() => {
+      // Offline or a gap in the published data: the next attempt is a minute
+      // away, and the status bar already says what is missing.
+    })
+    .finally(() => {
+      loading = false;
+      showStatus();
+    });
+}
+
 // ---------------------------------------------------------------- audio
 
 /**
@@ -151,6 +187,7 @@ const audio = {
 
   async unlock() {
     this.ctx = new (window.AudioContext ?? window.webkitAudioContext)();
+    this.ctx.addEventListener('statechange', () => showStatus());
     await this.ctx.resume();
     // A zero-length blip inside the gesture is what actually lifts the block.
     const silent = this.ctx.createBufferSource();
@@ -177,8 +214,16 @@ const audio = {
     if (!this.buffers.fajr) this.buffers.fajr = this.buffers.normal;
   },
 
-  play(kind, volume) {
+  /**
+   * Resolves to true only once sound is actually on its way out. A suspended
+   * context accepts sources and plays nothing, so the state is checked rather
+   * than assumed - that silence is otherwise invisible until someone notices
+   * the adhan never came.
+   */
+  async play(kind, volume) {
     this.stop();
+    if (!(await this.ready())) return false;
+
     const buffer = this.buffers[kind] ?? this.buffers.normal;
     const gain = this.ctx.createGain();
     gain.gain.value = volume;
@@ -186,7 +231,7 @@ const audio = {
 
     if (!buffer) {
       this.playing = this.chime(gain);
-      return;
+      return true;
     }
 
     const source = this.ctx.createBufferSource();
@@ -194,6 +239,23 @@ const audio = {
     source.connect(gain);
     source.start();
     this.playing = source;
+    return true;
+  },
+
+  /**
+   * The context is suspended again by screen sleep, an audio device change or
+   * the OS pausing the tab. resume() is enough in most cases; where the browser
+   * insists on a fresh gesture it stays suspended and the status bar says so.
+   */
+  async ready() {
+    if (!this.ctx) return false;
+    if (this.ctx.state === 'running') return true;
+    try {
+      await this.ctx.resume();
+    } catch {
+      // Needs a user gesture - handled by the click listener on the page.
+    }
+    return this.ctx.state === 'running';
   },
 
   /**
@@ -359,25 +421,43 @@ function findNext(today, now) {
 }
 
 let renderedDate = null;
+let dataProblem = null;
+
+/** `date:key` of every prayer already dealt with, played or deliberately skipped. */
 const fired = new Set();
+
+/** Crossed but not yet audible, kept so a blocked context is retried. */
+const pending = new Map();
+
+/** Vienna wall clock at the previous tick, which may be far in the past. */
+let lastTick = null;
 
 function render() {
   const now = viennaNow();
-  const today = days.get(now.date);
 
   el('clock').firstChild.nodeValue = `${two(now.h)}:${two(now.m)}`;
   el('seconds').textContent = `:${two(now.s)}`;
 
-  if (now.date !== renderedDate) {
+  const rolledOver = now.date !== renderedDate;
+  if (rolledOver) {
     renderedDate = now.date;
     const asDate = new Date(`${now.date}T12:00:00Z`);
     el('date').textContent = longDate.format(asDate);
     el('hijri').textContent = hijriDate ? hijriDate.format(asDate) : '';
   }
 
+  // A new day may need a month this session has never loaded.
+  ensureData(now, rolledOver);
+
+  const today = days.get(now.date);
   if (!today) {
-    setStatus(`Keine Daten für ${now.date} — bitte Datenstand prüfen.`, 'error');
+    dataProblem = `Keine Daten für ${now.date} — wird erneut geladen.`;
+    showStatus();
     return;
+  }
+  if (dataProblem) {
+    dataProblem = null;
+    showStatus();
   }
 
   const next = findNext(today, now);
@@ -402,34 +482,92 @@ function render() {
   fireDue(today, now);
 }
 
+/**
+ * Queues every prayer crossed since the previous tick. Firing on the interval
+ * that has passed rather than on a tick landing inside the prayer minute is
+ * what makes this survive a throttled background tab or a display that sleeps.
+ */
 function fireDue(today, now) {
+  const previous = lastTick;
+  lastTick = { date: now.date, sec: now.sec };
+
+  // First tick after startup: only the current second, so opening the page
+  // never replays a prayer that is already over. After a date change the whole
+  // day is in scope - a machine that wakes at 03:26 has to notice a 03:25 Fajr
+  // - and the catch-up limit below decides what is still worth playing.
+  const since = previous === null ? now.sec - 1 : previous.date === now.date ? previous.sec : -1;
+
   for (const prayer of PRAYERS) {
     if (!prayer.azan || !settings.enabled.includes(prayer.key)) continue;
 
     const at = toSeconds(today[prayer.key]);
     const id = `${now.date}:${prayer.key}`;
-    if (fired.has(id)) continue;
-    if (now.sec < at || now.sec > at + FIRE_WINDOW_S) continue;
+    if (fired.has(id) || pending.has(id)) continue;
+    if (at <= since || at > now.sec) continue;
 
-    fired.add(id);
-    audio.play(prayer.key === 'fajr' ? 'fajr' : 'normal', settings.volume);
-
-    // Highlight for exactly as long as the adhan is audible, whatever the
-    // length of the installed recording.
-    const slot = slots.get(prayer.key);
-    slot.classList.add('is-firing');
-    const clear = () => slot.classList.remove('is-firing');
-    if (audio.playing) audio.playing.onended = clear;
-    else setTimeout(clear, 5_000);
+    pending.set(id, { key: prayer.key, at });
   }
+
+  playPending(now);
+}
+
+let playing = false;
+
+function playPending(now) {
+  for (const [id, due] of pending) {
+    if (now.sec - due.at <= CATCH_UP_S) continue;
+    // Too late to still be the call to this prayer.
+    pending.delete(id);
+    fired.add(id);
+  }
+
+  const [id, due] = pending.entries().next().value ?? [];
+  if (!id || playing) return;
+
+  playing = true;
+  audio
+    .play(due.key === 'fajr' ? 'fajr' : 'normal', settings.volume)
+    .then((started) => {
+      if (!started) return; // Left pending: retried on the next tick.
+      pending.delete(id);
+      fired.add(id);
+      highlight(due.key);
+    })
+    .catch(() => {})
+    .finally(() => {
+      playing = false;
+      showStatus();
+    });
+}
+
+/** Highlight for exactly as long as the adhan is audible, whatever its length. */
+function highlight(key) {
+  const slot = slots.get(key);
+  slot.classList.add('is-firing');
+  const clear = () => slot.classList.remove('is-firing');
+  if (audio.playing) audio.playing.onended = clear;
+  else setTimeout(clear, 5_000);
 }
 
 // ---------------------------------------------------------------- startup
 
-function dataStatus() {
+/**
+ * Everything that can keep the adhan from being heard is reported here, most
+ * pressing first. A wall display has nobody watching a console, so a fault that
+ * only shows up as silence at the next prayer has to be visible before then.
+ */
+function showStatus() {
   const latest = dataMeta.months?.at(-1) ?? '';
   const source = `Quelle: IGGÖ (derislam.at) · Daten bis ${latest.slice(-7) || 'unbekannt'}`;
 
+  if (dataProblem) {
+    setStatus(dataProblem, 'error');
+    return;
+  }
+  if (audio.ctx && audio.ctx.state !== 'running') {
+    setStatus('Ton ist blockiert — bitte einmal auf die Seite klicken.', 'error');
+    return;
+  }
   // Only the regular adhan decides whether we are on the stand-in chime; a
   // missing Fajr recording just means Fajr reuses the regular one.
   if (!audio.buffers.normal) {
@@ -453,17 +591,30 @@ async function start() {
   try {
     await loadData();
   } catch (err) {
-    setStatus(`Gebetszeiten konnten nicht geladen werden: ${err.message}`, 'error');
-    return;
+    // Not fatal any more: render keeps retrying, so a display that is switched
+    // on before the month's data is published recovers on its own.
+    dataProblem = `Gebetszeiten konnten nicht geladen werden: ${err.message}`;
   }
 
   await audio.preload();
-  dataStatus();
+  showStatus();
   applyWakeLock();
 
   render();
   setInterval(render, 1000);
 }
+
+// A context the browser suspended is resumed by any gesture on the page, so
+// the recovery the status bar asks for works wherever someone clicks.
+document.addEventListener('click', () => {
+  audio.ready().then(showStatus);
+});
+
+// Coming back to the tab is the other moment worth re-checking: both the wake
+// lock and the audio context are dropped while it is hidden.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') audio.ready().then(showStatus);
+});
 
 el('enable').addEventListener('click', async () => {
   try {
@@ -475,7 +626,8 @@ el('enable').addEventListener('click', async () => {
 });
 
 el('test').addEventListener('click', () => {
-  audio.play('normal', settings.volume);
+  // The test button is also the check for a blocked context, so it reports.
+  audio.play('normal', settings.volume).then(showStatus);
 });
 
 el('settings-toggle').addEventListener('click', (event) => {

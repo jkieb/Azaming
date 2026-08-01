@@ -5,7 +5,10 @@
  * monthly data refresh is picked up on the next load.
  */
 
-const VERSION = 'azaming-v1';
+// Bump on every change to a shell file. The shell is served cache-first, so an
+// unchanged version means a display that is already running keeps the app.js it
+// cached on its first visit and never sees a fix.
+const VERSION = 'azaming-v2';
 
 const SHELL = [
   './',
