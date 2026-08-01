@@ -91,9 +91,29 @@ check('Duhr is highlighted as next', await dhuhr.evaluate((n) => n.classList.con
 await page.clock.runFor(6000);
 check('adhan fires at the prayer time', await dhuhr.evaluate((n) => n.classList.contains('is-firing')));
 
+// Decoding is what actually has to work at the prayer time - a file that the
+// browser cannot decode would otherwise only be noticed when it stays silent.
+const adhan = await page.evaluate(async () => {
+  try {
+    const ctx = new AudioContext();
+    const bytes = await (await fetch('audio/adhan.mp3')).arrayBuffer();
+    const buffer = await ctx.decodeAudioData(bytes);
+    return { ok: true, seconds: buffer.duration, channels: buffer.numberOfChannels };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
 check(
-  'missing audio file is reported rather than failing silently',
-  (await page.textContent('#status')).includes('Ersatzton'),
+  'adhan recording decodes in the browser',
+  adhan.ok && adhan.seconds > 30 && adhan.seconds < 900,
+  adhan.ok ? `${Math.round(adhan.seconds)}s, ${adhan.channels}ch` : adhan.error,
+);
+
+check(
+  'no stand-in chime warning once a recording is installed',
+  !(await page.textContent('#status')).includes('Ersatzton'),
+  await page.textContent('#status'),
 );
 
 // Roll past midnight into the next day's data.

@@ -1,30 +1,23 @@
 # Audio
 
-Two files go here. Neither is in the repository, because most adhan recordings
-circulating online are not licensed for redistribution and that is not a call
-to make on someone else's behalf.
+| File | Used for | Status |
+| --- | --- | --- |
+| `adhan.mp3` | Duhr, Assr, Maghrib, Ishaa — and Fajr while no Fajr file exists | present, 3:09, supplied as an Islamisches Zentrum Wien recording |
+| `adhan-fajr.mp3` | Fajr — the one containing *aṣ-ṣalātu khayrun min an-nawm* | not present |
 
-| File | Used for |
-| --- | --- |
-| `adhan.mp3` | Duhr, Assr, Maghrib, Ishaa |
-| `adhan-fajr.mp3` | Fajr — the one containing *aṣ-ṣalātu khayrun min an-nawm* |
+`adhan-fajr.mp3` is optional. Without it Fajr uses `adhan.mp3` and the status
+bar says so.
 
-`adhan-fajr.mp3` is optional; without it Fajr uses `adhan.mp3`.
-
-Until at least `adhan.mp3` exists the app still announces every prayer, using a
-short synthesised chime, and says so in the status bar. Nothing breaks — the
+If `adhan.mp3` is ever removed the app still announces every prayer with a
+short synthesised chime and flags it in the status bar — nothing breaks, the
 sound is just a placeholder.
 
-## Choosing a recording
+## Replacing a recording
 
-Check the licence before committing anything. Workable sources:
-
-- Ask the mosque whose times you are using (IGGÖ / Islamisches Zentrum Wien)
-  whether you may use their recording.
-- Archives that state an explicit licence, e.g. Creative Commons on
-  Wikimedia Commons or the Internet Archive.
-
-A YouTube rip is not a licence, whatever the video description says.
+Check the licence before committing anything. A YouTube rip is not a licence,
+whatever the video description says. Workable sources are the mosque itself, or
+an archive that states an explicit licence such as Creative Commons on
+Wikimedia Commons.
 
 ## Format
 

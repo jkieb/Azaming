@@ -24,9 +24,10 @@ Times are handled in Europe/Vienna wall-clock seconds rather than `Date`
 objects, so the adhan fires at the right moment regardless of how the display
 machine's own timezone is set.
 
-**Audio files are not in the repository.** See
-[`public/audio/README.md`](public/audio/README.md) — until you add one, every
-prayer is announced with a synthesised chime and the status bar says so.
+The adhan itself is `public/audio/adhan.mp3`. A separate Fajr recording is
+optional — see [`public/audio/README.md`](public/audio/README.md). With no
+recording at all the app still announces every prayer, using a synthesised
+chime, and says so in the status bar.
 
 ### Deployment
 

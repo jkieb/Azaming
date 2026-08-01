@@ -145,6 +145,7 @@ async function loadData() {
 const audio = {
   ctx: null,
   buffers: { normal: null, fajr: null },
+  hasOwnFajr: false,
   missing: [],
   playing: null,
 
@@ -172,6 +173,7 @@ const audio = {
       }),
     );
     // One recording is enough; Fajr falls back to the regular adhan.
+    this.hasOwnFajr = Boolean(this.buffers.fajr);
     if (!this.buffers.fajr) this.buffers.fajr = this.buffers.normal;
   },
 
@@ -412,24 +414,33 @@ function fireDue(today, now) {
     fired.add(id);
     audio.play(prayer.key === 'fajr' ? 'fajr' : 'normal', settings.volume);
 
+    // Highlight for exactly as long as the adhan is audible, whatever the
+    // length of the installed recording.
     const slot = slots.get(prayer.key);
     slot.classList.add('is-firing');
-    setTimeout(() => slot.classList.remove('is-firing'), 90_000);
+    const clear = () => slot.classList.remove('is-firing');
+    if (audio.playing) audio.playing.onended = clear;
+    else setTimeout(clear, 5_000);
   }
 }
 
 // ---------------------------------------------------------------- startup
 
 function dataStatus() {
-  if (audio.missing.length) {
-    setStatus(
-      `Ersatzton aktiv — ${audio.missing.join(' und ')} fehlt. Siehe public/audio/README.md.`,
-      'warn',
-    );
+  const latest = dataMeta.months?.at(-1) ?? '';
+  const source = `Quelle: IGGÖ (derislam.at) · Daten bis ${latest.slice(-7) || 'unbekannt'}`;
+
+  // Only the regular adhan decides whether we are on the stand-in chime; a
+  // missing Fajr recording just means Fajr reuses the regular one.
+  if (!audio.buffers.normal) {
+    setStatus('Ersatzton aktiv — keine Azan-Aufnahme in public/audio/.', 'warn');
     return;
   }
-  const latest = dataMeta.months?.at(-1) ?? '';
-  setStatus(`Quelle: IGGÖ (derislam.at) · Daten bis ${latest.slice(-7) || 'unbekannt'}`);
+  if (!audio.hasOwnFajr) {
+    setStatus(`${source} · Fadjr nutzt die reguläre Aufnahme`);
+    return;
+  }
+  setStatus(source);
 }
 
 async function start() {
