@@ -41,14 +41,21 @@ jobs:
       - name: Fetch
         id: fetch
         continue-on-error: true
-        run: node scripts/fetch-times.mjs
+        run: |
+          set -o pipefail
+          node scripts/fetch-times.mjs 2>&1 | tee fetch.log
 
       # The API is served to the site's own frontend, so if it ever starts
       # rejecting plain clients we can still get the same JSON from a browser.
+      # Echo why we ended up here first - otherwise the reason is buried above
+      # a few hundred lines of browser download.
       - name: Fetch (browser fallback)
         if: steps.fetch.outcome == 'failure'
         id: fetch_browser
         run: |
+          echo '--- the plain fetch failed with: ---'
+          tail -20 fetch.log || echo '(no fetch.log)'
+          echo '------------------------------------'
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
           node scripts/fetch-times.mjs --browser
