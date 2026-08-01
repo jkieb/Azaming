@@ -47,15 +47,10 @@ jobs:
 
       # The API is served to the site's own frontend, so if it ever starts
       # rejecting plain clients we can still get the same JSON from a browser.
-      # Echo why we ended up here first - otherwise the reason is buried above
-      # a few hundred lines of browser download.
       - name: Fetch (browser fallback)
         if: steps.fetch.outcome == 'failure'
         id: fetch_browser
         run: |
-          echo '--- the plain fetch failed with: ---'
-          tail -20 fetch.log || echo '(no fetch.log)'
-          echo '------------------------------------'
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
           node scripts/fetch-times.mjs --browser
@@ -108,3 +103,15 @@ jobs:
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           exit 1
+
+      # Last step on purpose: the fallback's browser download is hundreds of
+      # log lines, and anything printed before it is effectively unreadable.
+      - name: Why the plain fetch failed
+        if: always() && steps.fetch.outcome == 'failure'
+        run: |
+          {
+            echo '### Plain fetch failed, browser fallback was used'
+            echo '```'
+            tail -30 fetch.log 2>/dev/null || echo '(no fetch.log)'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
