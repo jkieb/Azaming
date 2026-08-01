@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [claude/azan-webapp-wien-deploy-pojkho, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+
+      - name: Data validation rules
+        run: npm test
+
+      # Drives the real page against the committed data on a controlled clock,
+      # which is the only way to check that the adhan fires when it should.
+      - name: App smoke test
+        run: |
+          npx playwright install --with-deps chromium
+          npm run smoke
