@@ -11,9 +11,9 @@
   </head>
   <body>
     <!--
-      Audio cannot start without a user gesture, and a wall display is set up
-      once and then left alone - so this is a blocking gate rather than a
-      dismissible hint. Everything behind it is inert until audio is unlocked.
+      Shown once, on the day the display is set up: browsers want a gesture
+      before the first sound. The answer is remembered, so a reload starts
+      straight into the app instead of waiting here for someone to walk past.
     -->
     <div id="gate" class="gate">
       <div class="gate-inner">
@@ -21,13 +21,24 @@
         <p>Gebetszeiten für Wien nach IGGÖ</p>
         <button id="enable" class="enable" type="button">Azan aktivieren</button>
         <p class="gate-note">
-          Browser erlauben Ton erst nach einem Klick. Danach bleibt dieser Tab
-          offen — im Hintergrund oder bei gesperrtem Bildschirm spielt kein Ton.
+          Browser erlauben Ton erst nach einem Klick. Danach merkt sich dieses
+          Display die Freigabe — auch über einen Neustart hinweg. Der Tab muss
+          offen bleiben; auf einem Handy mit gesperrtem Bildschirm spielt kein
+          Ton.
         </p>
       </div>
     </div>
 
     <main id="app" class="app" hidden>
+      <!--
+        The one fault nobody can be expected to infer from silence: sound is
+        blocked and no adhan will be heard. Readable across the room, and a
+        touch anywhere on it puts the sound back.
+      -->
+      <button id="alarm" class="alarm" type="button" hidden>
+        Kein Ton — bitte hier tippen, damit der Azan wieder spielt
+      </button>
+
       <header class="head">
         <div class="head-left">
           <div id="clock" class="clock">--:--<span id="seconds" class="seconds">:--</span></div>

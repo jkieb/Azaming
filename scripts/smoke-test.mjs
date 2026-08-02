@@ -23,6 +23,9 @@ const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
+  // Served correctly on purpose: the <audio> fallback path will not touch a
+  // recording handed over as application/octet-stream.
+  '.mp3': 'audio/mpeg',
 };
 
 const server = createServer(async (req, res) => {
@@ -62,30 +65,47 @@ const context = await browser.newContext({
   locale: 'de-AT',
 });
 // Records what actually reaches the speakers: a source started into a
-// suspended context makes no sound, which is not visible from the page.
+// suspended context makes no sound, which is not visible from the page. Both
+// output paths are watched, since the app falls back from one to the other.
 const spy = () => {
   window.__starts = [];
+  window.__contexts = [];
+  window.__elementPlays = 0;
+
   const Real = window.AudioContext;
   window.AudioContext = class extends Real {
     constructor(...args) {
       super(...args);
       window.__ctx = this;
+      window.__contexts.push(this);
     }
     createBufferSource() {
       const node = super.createBufferSource();
       const start = node.start.bind(node);
       node.start = (...args) => {
-        window.__starts.push({ state: this.state, seconds: node.buffer?.duration ?? 0 });
+        window.__starts.push({
+          state: this.state,
+          seconds: node.buffer?.duration ?? 0,
+          loop: node.loop,
+        });
         return start(...args);
       };
       return node;
     }
   };
+
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function patched(...args) {
+    // Arming an element plays it silently; only an audible play is a prayer.
+    if (this.volume > 0) window.__elementPlays += 1;
+    return play.apply(this, args);
+  };
 };
 
-// Only the adhan counts; the unlock blip is a zero-length buffer.
+// Only the adhan counts. The unlock blip is zero-length and the keep-alive tone
+// is a one-second loop; the recording runs for minutes.
 const audible = (page) =>
-  page.evaluate(() => window.__starts.filter((s) => s.state === 'running' && s.seconds > 1).length);
+  page.evaluate(() => window.__starts.filter((s) => s.state === 'running' && s.seconds > 30).length);
 
 /**
  * Advances the virtual clock a tick at a time, leaving real time in between for
@@ -164,6 +184,12 @@ await page.clock.runFor(6000);
 check('adhan fires at the prayer time', await fired(page, 2));
 check('and is actually audible', (await audible(page)) === 1);
 
+check(
+  'an inaudible keep-alive tone holds the audio device open',
+  await page.evaluate(() => window.__starts.some((s) => s.loop)),
+);
+check('no sound alarm while audio is healthy', await page.isHidden('#alarm'));
+
 // Decoding is what actually has to work at the prayer time - a file that the
 // browser cannot decode would otherwise only be noticed when it stays silent.
 const adhan = await page.evaluate(async () => {
@@ -229,6 +255,67 @@ await context.close();
   check('suspended context still highlights the prayer', await fired(p, 2));
   check('a suspended audio context is resumed rather than played into', (await audible(p)) === 1);
   check('and is running again afterwards', (await p.evaluate(() => window.__ctx.state)) === 'running');
+  await c.close();
+}
+
+// ---------------------------------------------------------------- reload
+{
+  // The one that used to cost whole days: a browser restart, a crash or a
+  // machine reboot put the page back behind the gate, where it waited for a
+  // person. An armed display has to come back by itself.
+  const { page: p, context: c } = await open('2026-08-01T11:05:55Z');
+  await p.reload();
+  await p.waitForSelector('#times .slot');
+  await p.waitForFunction(() => !document.getElementById('clock').textContent.startsWith('-'));
+
+  check('an armed display starts itself after a reload', await p.isHidden('#gate'));
+
+  await p.clock.setFixedTime(new Date('2026-08-01T11:06:05Z'));
+  await p.clock.runFor(1100);
+  check('and plays the adhan with nobody there to click', await fired(p, 2));
+  check('audible after an unattended restart', (await audible(p)) === 1);
+  await c.close();
+}
+
+// ---------------------------------------------------------------- dead context
+{
+  // A context that came back from a system sleep reports "running" while its
+  // clock stands still, and silently drops everything started into it. Opened
+  // at 11:00 Vienna, well clear of any prayer, so only the repair is measured.
+  const { page: p, context: c } = await open('2026-08-01T09:00:00Z');
+  await p.evaluate(() => {
+    Object.defineProperty(window.__ctx, 'currentTime', { get: () => 12.5 });
+  });
+  await p.clock.runFor(12000);
+
+  check(
+    'a context that died silently is torn down and rebuilt',
+    (await p.evaluate(() => window.__contexts.length)) === 2,
+  );
+
+  await p.clock.setFixedTime(new Date('2026-08-01T11:06:05Z'));
+  await p.clock.runFor(1100);
+  check('and the adhan is audible again through the new one', (await audible(p)) === 1);
+  await c.close();
+}
+
+// ---------------------------------------------------------------- element fallback
+{
+  // Web Audio can end up in a state no resume() recovers. The <audio> element
+  // is a separate path to the same speakers, armed at startup for exactly this.
+  const { page: p, context: c } = await open('2026-08-01T11:05:55Z');
+  await p.evaluate(() => {
+    window.__ctx.resume = () => Promise.resolve();
+    return window.__ctx.suspend();
+  });
+  await p.clock.runFor(6000);
+
+  check('a context that cannot be revived falls back to the audio element', await fired(p, 2));
+  check(
+    'and the fallback is a real, audible play',
+    (await p.evaluate(() => window.__elementPlays)) >= 1,
+  );
+  check('the sound alarm is up while Web Audio is down', await p.isVisible('#alarm'));
   await c.close();
 }
 
