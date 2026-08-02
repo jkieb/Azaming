@@ -26,7 +26,9 @@ file starts playing the instant the prayer time is reached. Typical length is
 two to four minutes, roughly 2–4 MB, which is well inside the 1 GB GitHub Pages
 limit.
 
-The file is decoded once at startup and held in memory, so playback does not
-depend on the network at the moment it matters. It is also loaded a second time
-into an `<audio>` element kept as a fallback path to the speakers, so a few
-megabytes is the sensible ceiling.
+Playback streams the file from an `<audio>` element fed by the service worker
+cache, so it does not depend on the network at the moment it matters and it does
+not hold the recording in memory uncompressed. Length is therefore cheap — but
+keep it inside a few megabytes anyway, since the file is cached in full and the
+Web Audio fallback, if it is ever reached, does decode the whole thing (roughly
+10 MB of RAM per minute of stereo).

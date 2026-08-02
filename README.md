@@ -31,14 +31,22 @@ startup. Every mechanism below exists because it was the reason a display went
 quiet, and each is covered by `npm run smoke`:
 
 - **A reload used to end the day.** A browser restart, a crash, a reboot or a
-  renderer the OS killed for memory put the page back behind the gate, where it
+  tab the OS reaped for memory put the page back behind the gate, where it
   waited for a person to walk past — so the only prayer that played was the one
   after somebody happened to click. The gate is now remembered in
   `localStorage`: an armed display starts itself and takes the audio permission
-  again unprompted. A page that plays sound day after day earns the right to do
-  that unasked, and one launched as an installed app has it outright. If the
-  browser still refuses, a red banner across the screen asks for a touch —
-  anywhere on the page is enough.
+  again unprompted. Whether that succeeds is the browser's call — Chrome grants
+  it to a page that plays sound day after day, and an installed app has it
+  outright, but **iOS grants it to nobody** (see below). If it is refused, a red
+  banner across the screen asks for a touch — anywhere on the page is enough.
+- **Playback goes through an `<audio>` element first, Web Audio second.** That
+  is the opposite of where this started, for three reasons. `decodeAudioData`
+  holds the recording as uncompressed PCM for as long as the page lives — three
+  minutes of stereo is some 67 MB, which on a small device is a good way to get
+  the whole tab reaped, and a reaped tab is silence. On iOS a muted device
+  silences Web Audio but not an element. And Web Audio is still the better
+  instrument once it works, so it stays as the fallback — nothing is decoded
+  unless that fallback is actually reached.
 - **An inaudible keep-alive tone** (60 Hz, about −60 dBFS) runs for as long as
   the app does. A tab producing no sound is throttled to roughly one timer a
   minute and can be frozen outright; a tab that is producing sound is left alone
@@ -69,17 +77,69 @@ The cost of the keep-alive is that the tab is permanently marked as playing
 audio, which is exactly the point — that marking is what the browser reads
 before deciding whether to throttle it.
 
+### Reading what happened
+
+Silence has no shape. A prayer that was switched off, one the frozen page
+noticed too late, and one the browser refused to play all look identical the
+next morning — and each needs a different fix. Working out which it was cost
+more time here than any of the fixes did, so the display now keeps the answer:
+
+- The status bar ends with **"Azan zuletzt …"**, remembered across reloads.
+- *Einstellungen → Verlauf* lists what became of each prayer the app saw pass:
+  `01.08. 13:20  Duhr — verworfen, zu spät bemerkt (14 min zu spät)`. The four
+  outcomes are *gespielt*, *stumm geschaltet*, *verworfen* and *Ton war
+  blockiert*, and they point at four different causes.
+- A **refused screen wake lock is now reported** rather than swallowed. It used
+  to fail in silence, which is the worst possible way for it to fail: a locked
+  screen suspends the page, so the prayer passes unnoticed and is then dropped
+  as too old to call — while the display looks perfectly healthy. iOS refuses
+  the lock in Low Power Mode without a word, so the status bar says
+  *"Bildschirmsperre aktiv"* and the app keeps trying to take it back.
+
+### iPad and iPhone
+
+Safari on iOS is its own case, and the display this was written for is an iPad
+(5th generation, 2 GB RAM, iPadOS 16 — the last it gets). Two platform rules
+override most of the above:
+
+- **A locked or backgrounded screen suspends the AudioContext**
+  ([WebKit #237878](https://bugs.webkit.org/show_bug.cgi?id=237878)). No
+  keep-alive tone prevents this. The keep-alive on iOS is therefore a looping
+  near-silent `<audio>` element instead, since what iOS keeps alive is a media
+  session — but the reliable answer is to stop the screen from locking at all.
+- **There is no unattended autoplay to earn.** iOS has no engagement-based
+  grant, so after a reload the banner comes up and someone has to touch it once.
+
+Settings that matter on the device, in order:
+
+1. *Einstellungen → Anzeige & Helligkeit → Automatische Sperre → **Nie***, and
+   leave it on the charger.
+2. Not muted — on iOS a muted device silences Web Audio, which is one reason
+   playback goes through the element first.
+3. Add the page to the Home screen and launch it from there: its own process,
+   less competition for the 2 GB, no Safari tab to reap.
+4. Guided Access (*Geführter Zugriff*) to keep it in the foreground.
+
+Even then, a browser tab on a 2 GB iPad is the hardest place to do this. If a
+Raspberry Pi or an old laptop is available, a `systemd` timer playing the file
+is drastically more robust — the display can keep showing the times either way.
+
 ### When the adhan does not play
 
 The failure is silent by nature, so the app says what is wrong on screen rather
 than leaving it to be inferred from a missed prayer. In order of what to check:
 
+0. **Open *Einstellungen → Verlauf* first.** It names the cause outright, and
+   the four entries below are the four things it can say.
 1. **The red banner is up.** No sound would come out. Touching the page re-arms
    both output paths; if it stays up, the browser is refusing audio for this
    site and the site's sound permission needs to be set to *allow*.
-2. **"Keine Daten für …".** The day is not in the loaded months. The app retries
+2. **"Bildschirmsperre aktiv".** The screen is free to sleep, and a sleeping
+   screen means missed prayers. On iOS: Low Power Mode off, on the charger,
+   auto-lock *Nie*.
+3. **"Keine Daten für …".** The day is not in the loaded months. The app retries
    the fetch every minute and recovers on its own once the month is published.
-3. **A slot says "stumm".** That prayer is switched off under *Einstellungen*.
+4. **A slot says "stumm".** That prayer is switched off under *Einstellungen*.
 
 One thing to know when shipping a fix: `public/sw.js` serves the app shell
 cache-first, so a display that is already running keeps the `app.js` it cached

@@ -355,6 +355,45 @@ body {
   cursor: pointer;
 }
 
+/* ---------- event log ---------- */
+
+.log-box {
+  grid-column: 1 / -1;
+}
+
+.log {
+  max-height: 11rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-line {
+  padding: 0.15rem 0;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--line);
+}
+
+.log-line:last-child {
+  border-bottom: 0;
+}
+
+.log-line.is-played {
+  color: var(--accent);
+}
+
+.log-line.is-late,
+.log-line.is-blocked {
+  color: #f08c8c;
+}
+
+.log-empty {
+  color: var(--ink-dim);
+}
+
 input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
