@@ -77,9 +77,24 @@ The cost of the keep-alive is that the tab is permanently marked as playing
 audio, which is exactly the point — that marking is what the browser reads
 before deciding whether to throttle it.
 
-The status bar ends with **"Azan zuletzt …"**, remembered across reloads. The
-morning after a silent prayer that is the only question worth answering, and
-nothing else on screen can reconstruct it.
+### Reading what happened
+
+Silence has no shape. A prayer that was switched off, one the frozen page
+noticed too late, and one the browser refused to play all look identical the
+next morning — and each needs a different fix. Working out which it was cost
+more time here than any of the fixes did, so the display now keeps the answer:
+
+- The status bar ends with **"Azan zuletzt …"**, remembered across reloads.
+- *Einstellungen → Verlauf* lists what became of each prayer the app saw pass:
+  `01.08. 13:20  Duhr — verworfen, zu spät bemerkt (14 min zu spät)`. The four
+  outcomes are *gespielt*, *stumm geschaltet*, *verworfen* and *Ton war
+  blockiert*, and they point at four different causes.
+- A **refused screen wake lock is now reported** rather than swallowed. It used
+  to fail in silence, which is the worst possible way for it to fail: a locked
+  screen suspends the page, so the prayer passes unnoticed and is then dropped
+  as too old to call — while the display looks perfectly healthy. iOS refuses
+  the lock in Low Power Mode without a word, so the status bar says
+  *"Bildschirmsperre aktiv"* and the app keeps trying to take it back.
 
 ### iPad and iPhone
 
@@ -114,12 +129,17 @@ is drastically more robust — the display can keep showing the times either way
 The failure is silent by nature, so the app says what is wrong on screen rather
 than leaving it to be inferred from a missed prayer. In order of what to check:
 
+0. **Open *Einstellungen → Verlauf* first.** It names the cause outright, and
+   the four entries below are the four things it can say.
 1. **The red banner is up.** No sound would come out. Touching the page re-arms
    both output paths; if it stays up, the browser is refusing audio for this
    site and the site's sound permission needs to be set to *allow*.
-2. **"Keine Daten für …".** The day is not in the loaded months. The app retries
+2. **"Bildschirmsperre aktiv".** The screen is free to sleep, and a sleeping
+   screen means missed prayers. On iOS: Low Power Mode off, on the charger,
+   auto-lock *Nie*.
+3. **"Keine Daten für …".** The day is not in the loaded months. The app retries
    the fetch every minute and recovers on its own once the month is published.
-3. **A slot says "stumm".** That prayer is switched off under *Einstellungen*.
+4. **A slot says "stumm".** That prayer is switched off under *Einstellungen*.
 
 One thing to know when shipping a fix: `public/sw.js` serves the app shell
 cache-first, so a display that is already running keeps the `app.js` it cached

@@ -218,6 +218,16 @@ check(
   (await page.textContent('#status')).trim(),
 );
 
+/** The lines of the on-screen record of what became of each prayer. */
+const logLines = (p) =>
+  p.evaluate(() => [...document.querySelectorAll('#log .log-line')].map((n) => n.textContent));
+
+check(
+  'the log records the prayer as played',
+  (await logLines(page)).some((t) => t.includes('Duhr') && t.includes('gespielt')),
+  (await logLines(page))[0],
+);
+
 // Decoding is what actually has to work at the prayer time - a file that the
 // browser cannot decode would otherwise only be noticed when it stays silent.
 const adhan = await page.evaluate(async () => {
@@ -270,6 +280,52 @@ await context.close();
   await p.clock.setFixedTime(new Date('2026-08-01T11:20:00Z')); // 14 minutes after
   await p.clock.runFor(1100);
   check('a prayer missed by more than the catch-up window is not played late', !(await fired(p, 2)));
+  // Dropping it is right; leaving no trace of the decision is what used to turn
+  // one missed prayer into a week of guessing.
+  const dropped = await logLines(p);
+  check(
+    'and the log says it was dropped and how late it was',
+    dropped.some((t) => t.includes('Duhr') && t.includes('zu spät')),
+    dropped[0],
+  );
+  await c.close();
+}
+
+// ---------------------------------------------------------------- wake lock
+{
+  // Low Power Mode on iOS refuses the screen wake lock without a word, and a
+  // sleeping screen is a page that never notices the prayer. A display that
+  // looks healthy while that is true is the whole failure in miniature.
+  const c = await browser.newContext({ timezoneId: 'America/New_York', locale: 'de-AT' });
+  const p = await c.newPage();
+  await p.addInitScript(spy);
+  await p.addInitScript(() => {
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: {
+        request: () =>
+          Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' })),
+      },
+    });
+  });
+  await p.clock.install({ time: new Date('2026-08-01T11:05:55Z') });
+  await p.goto(base);
+  await p.getByRole('button', { name: 'Azan aktivieren' }).click();
+  await p.waitForSelector('#times .slot');
+  await p.clock.runFor(1000);
+
+  let reported = false;
+  try {
+    await p.waitForFunction(
+      () => document.getElementById('status').textContent.includes('Bildschirmsperre'),
+      undefined,
+      { timeout: 3000 },
+    );
+    reported = true;
+  } catch {
+    reported = false;
+  }
+  check('a refused wake lock is reported instead of swallowed', reported, (await p.textContent('#status')).trim());
   await c.close();
 }
 

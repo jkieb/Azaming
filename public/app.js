@@ -43,6 +43,10 @@ const ARMED_KEY = 'azaming.armed.v1';
 /** Survives reloads, so the status bar can answer "did it play at all?". */
 const LAST_PLAYED_KEY = 'azaming.lastPlayed.v1';
 
+/** The record of what became of each prayer. See logEvent(). */
+const LOG_KEY = 'azaming.log.v1';
+const LOG_MAX = 30;
+
 /**
  * The keep-alive tone: 60 Hz at roughly -60 dBFS. Browsers count a stream
  * quieter than about -72 dBFS as silence, so this is above the line that
@@ -668,27 +672,153 @@ function saveSettings() {
 
 // ---------------------------------------------------------------- wake lock
 
+/*
+ * The wake lock is not a nicety here, it is the difference between a display
+ * that announces every prayer and one that announces the evening prayer.
+ * A locked screen suspends the page - on iOS entirely - so the prayer passes
+ * unnoticed and is then dropped as too old to still be called.
+ *
+ * Which is why a refused lock may no longer be swallowed. The OS is free to
+ * say no - Low Power Mode on iOS does exactly that, quietly - and a display
+ * that looks healthy while its screen is about to sleep is the failure this
+ * whole file is trying to make impossible.
+ */
+
 let wakeLockSentinel = null;
+let wakeLockProblem = null;
+let wakeLockAttempt = 0;
 
 async function applyWakeLock() {
-  if (!('wakeLock' in navigator)) return;
-  if (settings.wakeLock && !wakeLockSentinel && document.visibilityState === 'visible') {
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-      wakeLockSentinel.addEventListener('release', () => {
-        wakeLockSentinel = null;
-      });
-    } catch {
-      // Denied or unsupported - the display just sleeps as configured by the OS.
-    }
-  } else if (!settings.wakeLock && wakeLockSentinel) {
-    await wakeLockSentinel.release().catch(() => {});
-    wakeLockSentinel = null;
+  if (!('wakeLock' in navigator)) {
+    wakeLockProblem = settings.wakeLock ? 'vom Browser nicht unterstützt' : null;
+    return;
   }
+
+  if (!settings.wakeLock) {
+    wakeLockProblem = null;
+    if (wakeLockSentinel) {
+      await wakeLockSentinel.release().catch(() => {});
+      wakeLockSentinel = null;
+    }
+    showStatus();
+    return;
+  }
+
+  if (wakeLockSentinel || document.visibilityState !== 'visible') return;
+
+  wakeLockAttempt = Date.now();
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockProblem = null;
+    // Released by the OS when the tab is hidden or power gets tight; the retry
+    // in render() takes it back rather than leaving the screen free to sleep.
+    wakeLockSentinel.addEventListener('release', () => {
+      wakeLockSentinel = null;
+      wakeLockProblem = 'vom System aufgehoben';
+      showStatus();
+    });
+  } catch (err) {
+    wakeLockSentinel = null;
+    wakeLockProblem =
+      err?.name === 'NotAllowedError' ? 'vom System verweigert (Stromsparmodus?)' : 'nicht möglich';
+  }
+  showStatus();
+}
+
+/** True while the screen is demonstrably being held awake. */
+const screenHeld = () => Boolean(wakeLockSentinel);
+
+/** Retried on a slow cadence: a refusal now is often granted after a charge. */
+function retryWakeLock() {
+  if (!settings.wakeLock || screenHeld()) return;
+  if (Date.now() - wakeLockAttempt < 30_000) return;
+  applyWakeLock();
 }
 
 // The lock is dropped whenever the tab is hidden and has to be taken again.
 document.addEventListener('visibilitychange', applyWakeLock);
+
+// ---------------------------------------------------------------- log
+
+/*
+ * What became of every prayer the app saw pass. Silence has no shape: it looks
+ * the same whether the prayer was switched off, whether the page was frozen and
+ * noticed too late, or whether the sound was refused. Each of those needs a
+ * different fix, and working out which one it was after the fact cost more time
+ * here than any of the fixes did. So the display keeps the answer instead.
+ */
+
+let eventLog = [];
+
+/** `date:key:outcome` of what has already been recorded, so ticks do not repeat it. */
+const logged = new Set();
+
+const LABELS = Object.fromEntries(PRAYERS.map((p) => [p.key, p.label]));
+
+function loadLog() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LOG_KEY) ?? '[]');
+    if (Array.isArray(stored)) eventLog = stored.slice(0, LOG_MAX);
+  } catch {
+    // Unreadable or absent; the log starts empty and fills from here.
+  }
+}
+
+/** "4 h 12 min", for saying how late something was noticed. */
+function formatLate(seconds) {
+  const m = Math.round(seconds / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+function logEvent(id, key, outcome, detail = '') {
+  const mark = `${id}:${outcome}`;
+  if (logged.has(mark)) return;
+  logged.add(mark);
+
+  const now = viennaNow();
+  eventLog.unshift({
+    at: `${now.date.slice(8)}.${now.date.slice(5, 7)}. ${two(now.h)}:${two(now.m)}`,
+    prayer: LABELS[key] ?? key,
+    outcome,
+    detail,
+  });
+  eventLog = eventLog.slice(0, LOG_MAX);
+  try {
+    localStorage.setItem(LOG_KEY, JSON.stringify(eventLog));
+  } catch {
+    // Not persisted; the running session still shows it.
+  }
+  renderLog();
+}
+
+function renderLog() {
+  const list = el('log');
+  if (!list) return;
+  list.replaceChildren();
+  if (!eventLog.length) {
+    const empty = document.createElement('li');
+    empty.className = 'log-empty';
+    empty.textContent = 'Noch nichts aufgezeichnet.';
+    list.append(empty);
+    return;
+  }
+  for (const entry of eventLog) {
+    const item = document.createElement('li');
+    item.className = `log-line is-${entry.outcome}`;
+    item.textContent =
+      `${entry.at}  ${entry.prayer} — ${LOG_TEXT[entry.outcome] ?? entry.outcome}` +
+      (entry.detail ? ` (${entry.detail})` : '');
+    list.append(item);
+  }
+}
+
+const LOG_TEXT = {
+  played: 'gespielt',
+  muted: 'stumm geschaltet',
+  late: 'verworfen, zu spät bemerkt',
+  blocked: 'Ton war blockiert',
+};
 
 // ---------------------------------------------------------------- rendering
 
@@ -789,6 +919,7 @@ function render() {
   // Before anything can be due: a context that has died is rebuilt here, so a
   // prayer in this same tick plays into an output that was just proved alive.
   audio.check();
+  retryWakeLock();
   el('alarm').hidden = audio.live();
 
   el('clock').firstChild.nodeValue = `${two(now.h)}:${two(now.m)}`;
@@ -854,12 +985,20 @@ function fireDue(today, now) {
   const since = previous === null ? now.sec - 1 : previous.date === now.date ? previous.sec : -1;
 
   for (const prayer of PRAYERS) {
-    if (!prayer.azan || !settings.enabled.includes(prayer.key)) continue;
+    if (!prayer.azan) continue;
 
     const at = toSeconds(today[prayer.key]);
     const id = `${now.date}:${prayer.key}`;
     if (fired.has(id) || pending.has(id)) continue;
     if (at <= since || at > now.sec) continue;
+
+    // A prayer switched off is dealt with, not pending - but it is recorded,
+    // because "nothing happened" is exactly what needs explaining afterwards.
+    if (!settings.enabled.includes(prayer.key)) {
+      fired.add(id);
+      logEvent(id, prayer.key, 'muted');
+      continue;
+    }
 
     pending.set(id, { key: prayer.key, at });
   }
@@ -875,6 +1014,7 @@ function playPending(now) {
     // Too late to still be the call to this prayer.
     pending.delete(id);
     fired.add(id);
+    logEvent(id, due.key, 'late', `${formatLate(now.sec - due.at)} zu spät`);
   }
 
   const [id, due] = pending.entries().next().value ?? [];
@@ -884,9 +1024,15 @@ function playPending(now) {
   audio
     .play(due.key === 'fajr' ? 'fajr' : 'normal', settings.volume)
     .then((started) => {
-      if (!started) return; // Left pending: retried on the next tick.
+      if (!started) {
+        // Left pending and retried on the next tick, but recorded now: this is
+        // the state that ends in a dropped prayer if nobody touches the screen.
+        logEvent(id, due.key, 'blocked');
+        return;
+      }
       pending.delete(id);
       fired.add(id);
+      logEvent(id, due.key, 'played');
       highlight(due.key);
     })
     .catch(() => {})
@@ -937,8 +1083,15 @@ function showStatus() {
     setStatus('Ersatzton aktiv — keine Azan-Aufnahme in public/audio/.', 'warn');
     return;
   }
+
+  // The screen going to sleep is not a cosmetic problem: a suspended page does
+  // not notice a prayer, and by the time it wakes the moment has passed. So a
+  // lock the system refused is said out loud rather than silently accepted.
+  const asleep = settings.wakeLock && !screenHeld();
+  const wake = asleep ? ` · Bildschirmsperre aktiv — ${wakeLockProblem ?? 'noch nicht aktiv'}` : '';
+
   const fajr = audio.hasOwnFajr ? '' : ' · Fadjr nutzt die reguläre Aufnahme';
-  setStatus(`${source}${fajr}${last}`);
+  setStatus(`${source}${fajr}${wake}${last}`, asleep ? 'warn' : '');
 }
 
 async function start() {
@@ -950,6 +1103,8 @@ async function start() {
   } catch {
     // Private mode: the line just reads "noch nie gespielt" until one plays.
   }
+  loadLog();
+  renderLog();
 
   try {
     await loadData();
