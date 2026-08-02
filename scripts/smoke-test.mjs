@@ -71,8 +71,15 @@ const spy = () => {
   window.__starts = [];
   window.__contexts = [];
   window.__elementPlays = 0;
+  window.__decodes = 0;
 
   const Real = window.AudioContext;
+  const decode = Real.prototype.decodeAudioData;
+  Real.prototype.decodeAudioData = function patched(...args) {
+    window.__decodes += 1;
+    return decode.apply(this, args);
+  };
+
   window.AudioContext = class extends Real {
     constructor(...args) {
       super(...args);
@@ -102,10 +109,18 @@ const spy = () => {
   };
 };
 
-// Only the adhan counts. The unlock blip is zero-length and the keep-alive tone
-// is a one-second loop; the recording runs for minutes.
+/**
+ * How many adhans actually reached the speakers, by either path - the <audio>
+ * element that normally carries it, or the Web Audio fallback. Only the
+ * recording counts: the unlock blip is zero-length, the keep-alive tone is a
+ * one-second loop, and arming an element plays it at volume zero.
+ */
 const audible = (page) =>
-  page.evaluate(() => window.__starts.filter((s) => s.state === 'running' && s.seconds > 30).length);
+  page.evaluate(
+    () =>
+      window.__starts.filter((s) => s.state === 'running' && s.seconds > 30).length +
+      window.__elementPlays,
+  );
 
 /**
  * Advances the virtual clock a tick at a time, leaving real time in between for
@@ -190,6 +205,19 @@ check(
 );
 check('no sound alarm while audio is healthy', await page.isHidden('#alarm'));
 
+// Decoding three minutes of stereo costs some 67 MB of PCM for as long as the
+// page lives, which on a small device is a way to get the tab reaped - and a
+// reaped tab is silence. Nothing may be decoded unless the fallback is reached.
+check(
+  'the recording is never decoded into memory up front',
+  (await page.evaluate(() => window.__decodes)) === 0,
+);
+check(
+  'the status bar records when the adhan last played',
+  (await page.textContent('#status')).includes('Azan zuletzt'),
+  (await page.textContent('#status')).trim(),
+);
+
 // Decoding is what actually has to work at the prayer time - a file that the
 // browser cannot decode would otherwise only be noticed when it stays silent.
 const adhan = await page.evaluate(async () => {
@@ -253,7 +281,7 @@ await context.close();
   await p.evaluate(() => window.__ctx.suspend());
   await p.clock.runFor(6000);
   check('suspended context still highlights the prayer', await fired(p, 2));
-  check('a suspended audio context is resumed rather than played into', (await audible(p)) === 1);
+  check('a suspended context still produces an audible adhan', (await audible(p)) === 1);
   check('and is running again afterwards', (await p.evaluate(() => window.__ctx.state)) === 'running');
   await c.close();
 }

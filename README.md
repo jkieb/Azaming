@@ -31,14 +31,22 @@ startup. Every mechanism below exists because it was the reason a display went
 quiet, and each is covered by `npm run smoke`:
 
 - **A reload used to end the day.** A browser restart, a crash, a reboot or a
-  renderer the OS killed for memory put the page back behind the gate, where it
+  tab the OS reaped for memory put the page back behind the gate, where it
   waited for a person to walk past — so the only prayer that played was the one
   after somebody happened to click. The gate is now remembered in
   `localStorage`: an armed display starts itself and takes the audio permission
-  again unprompted. A page that plays sound day after day earns the right to do
-  that unasked, and one launched as an installed app has it outright. If the
-  browser still refuses, a red banner across the screen asks for a touch —
-  anywhere on the page is enough.
+  again unprompted. Whether that succeeds is the browser's call — Chrome grants
+  it to a page that plays sound day after day, and an installed app has it
+  outright, but **iOS grants it to nobody** (see below). If it is refused, a red
+  banner across the screen asks for a touch — anywhere on the page is enough.
+- **Playback goes through an `<audio>` element first, Web Audio second.** That
+  is the opposite of where this started, for three reasons. `decodeAudioData`
+  holds the recording as uncompressed PCM for as long as the page lives — three
+  minutes of stereo is some 67 MB, which on a small device is a good way to get
+  the whole tab reaped, and a reaped tab is silence. On iOS a muted device
+  silences Web Audio but not an element. And Web Audio is still the better
+  instrument once it works, so it stays as the fallback — nothing is decoded
+  unless that fallback is actually reached.
 - **An inaudible keep-alive tone** (60 Hz, about −60 dBFS) runs for as long as
   the app does. A tab producing no sound is throttled to roughly one timer a
   minute and can be frozen outright; a tab that is producing sound is left alone
@@ -68,6 +76,38 @@ quiet, and each is covered by `npm run smoke`:
 The cost of the keep-alive is that the tab is permanently marked as playing
 audio, which is exactly the point — that marking is what the browser reads
 before deciding whether to throttle it.
+
+The status bar ends with **"Azan zuletzt …"**, remembered across reloads. The
+morning after a silent prayer that is the only question worth answering, and
+nothing else on screen can reconstruct it.
+
+### iPad and iPhone
+
+Safari on iOS is its own case, and the display this was written for is an iPad
+(5th generation, 2 GB RAM, iPadOS 16 — the last it gets). Two platform rules
+override most of the above:
+
+- **A locked or backgrounded screen suspends the AudioContext**
+  ([WebKit #237878](https://bugs.webkit.org/show_bug.cgi?id=237878)). No
+  keep-alive tone prevents this. The keep-alive on iOS is therefore a looping
+  near-silent `<audio>` element instead, since what iOS keeps alive is a media
+  session — but the reliable answer is to stop the screen from locking at all.
+- **There is no unattended autoplay to earn.** iOS has no engagement-based
+  grant, so after a reload the banner comes up and someone has to touch it once.
+
+Settings that matter on the device, in order:
+
+1. *Einstellungen → Anzeige & Helligkeit → Automatische Sperre → **Nie***, and
+   leave it on the charger.
+2. Not muted — on iOS a muted device silences Web Audio, which is one reason
+   playback goes through the element first.
+3. Add the page to the Home screen and launch it from there: its own process,
+   less competition for the 2 GB, no Safari tab to reap.
+4. Guided Access (*Geführter Zugriff*) to keep it in the foreground.
+
+Even then, a browser tab on a 2 GB iPad is the hardest place to do this. If a
+Raspberry Pi or an old laptop is available, a `systemd` timer playing the file
+is drastically more robust — the display can keep showing the times either way.
 
 ### When the adhan does not play
 

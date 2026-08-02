@@ -40,6 +40,9 @@ const SETTINGS_KEY = 'azaming.settings.v1';
 /** Set once the gate has been passed, so a reload never lands back on it. */
 const ARMED_KEY = 'azaming.armed.v1';
 
+/** Survives reloads, so the status bar can answer "did it play at all?". */
+const LAST_PLAYED_KEY = 'azaming.lastPlayed.v1';
+
 /**
  * The keep-alive tone: 60 Hz at roughly -60 dBFS. Browsers count a stream
  * quieter than about -72 dBFS as silence, so this is above the line that
@@ -197,14 +200,13 @@ function ensureData(now, force = false) {
 /**
  * Switching the sound on is not a moment, it is a state that has to be held.
  *
- * A gesture is only needed to open an AudioContext. What keeps a display quiet
- * for months is everything that happens afterwards, and none of it announces
- * itself:
+ * A gesture only opens the door. What keeps a display quiet for months is
+ * everything that happens afterwards, and none of it announces itself:
  *
- *   - A reload - a browser restart, a crash, a machine reboot, a renderer the
- *     OS killed for memory - used to put the page back behind the gate, where
- *     it waited for someone to walk past. That is the difference between
- *     missing one prayer and missing every prayer until a human notices.
+ *   - A reload - a browser restart, a crash, a reboot, or a tab the OS reaped
+ *     for memory - used to put the page back behind the gate, where it waited
+ *     for someone to walk past. That is the difference between missing one
+ *     prayer and missing every prayer until a human notices.
  *   - A tab producing no sound is throttled to about one timer a minute and may
  *     be frozen outright; a tab that is producing sound is left alone by both.
  *   - Screen sleep, an audio device change or the OS pausing the tab suspend
@@ -212,25 +214,52 @@ function ensureData(now, force = false) {
  *     "running" while its clock stands still and nothing reaches the speakers -
  *     sources started into it are accepted and silently dropped.
  *
- * So: the permission is remembered and re-taken unprompted, the context is held
- * open by an inaudible keep-alive tone, and that tone doubles as the health
- * probe - while the audio clock advances, the output device is demonstrably
- * alive. When it stops, the context is rebuilt rather than played into. An
- * <audio> element is kept armed as a second, independent path to the speakers.
+ * So the permission is remembered and re-taken unprompted, the output is held
+ * open by an inaudible keep-alive, and that keep-alive doubles as the health
+ * probe: while the audio clock advances the device is demonstrably alive, and
+ * when it stops the context is rebuilt rather than played into.
  *
- * Web Audio stays the primary path because the recording is decoded once up
- * front: playback at the prayer time starts immediately, with no fetch and no
- * decode at the one moment that matters.
+ * Playback goes through an <audio> element first and Web Audio second, which
+ * is the opposite of where this started. Three reasons, all learned from a
+ * 2 GB iPad:
+ *
+ *   - decodeAudioData holds the recording as uncompressed PCM for as long as
+ *     the page lives. Three minutes of stereo is some 67 MB, which on a small
+ *     device is a good way to get the whole tab reaped - and a reaped tab is
+ *     exactly the silence this file exists to prevent. The element streams
+ *     from the same service-worker cache and holds a few megabytes.
+ *   - On iOS a muted device silences Web Audio but not an <audio> element, so
+ *     the element is the path that survives someone tapping the wrong button.
+ *   - Web Audio is still the better instrument once it works, so it stays as
+ *     the fallback - and only then is anything decoded.
  */
+
+/**
+ * iOS is its own case throughout: it suspends an AudioContext the moment the
+ * screen locks or the browser backgrounds, and it grants no unattended
+ * playback the way engagement-based policies elsewhere do. iPadOS reports
+ * itself as a Mac, so touch points are what tell them apart.
+ */
+const isIOS =
+  /iP(hone|ad|od)/.test(navigator.platform ?? '') ||
+  (/Mac/.test(navigator.platform ?? '') && navigator.maxTouchPoints > 1);
+
+const AUDIO_FILES = { normal: 'audio/adhan.mp3', fajr: 'audio/adhan-fajr.mp3' };
+
 const audio = {
   ctx: null,
+  /** Which recordings exist on the server, decided without downloading them. */
+  available: { normal: false, fajr: false },
   buffers: { normal: null, fajr: null },
   elements: { normal: null, fajr: null },
   elementsArmed: false,
   hasOwnFajr: false,
   keepAlive: null,
+  keepAliveEl: null,
   playing: null,
   viaElement: false,
+  /** Vienna time of the last playback that actually started, for the status bar. */
+  lastPlayed: null,
 
   /** Last audio-clock reading and how many ticks it has failed to advance. */
   clock: -1,
@@ -270,12 +299,30 @@ const audio = {
   },
 
   /**
+   * The same idea for iOS, where the Web Audio tone above buys nothing: what
+   * iOS keeps alive is a *media session*, so the keep-alive has to be a media
+   * element. While one is playing the page keeps its audio session and its
+   * claim on the output, instead of being torn down at the first lock screen.
+   * The clip is generated rather than shipped, so there is no second asset to
+   * keep in step with the recording.
+   */
+  startElementKeepAlive() {
+    if (this.keepAliveEl) return;
+    const el = new Audio(quietWavUrl());
+    el.loop = true;
+    el.volume = 1; // The clip itself is near-silence; see quietWavUrl().
+    this.keepAliveEl = el;
+    el.play().catch(() => {
+      // Not unlocked yet. Every arm() tries again.
+    });
+  },
+
+  /**
    * Brings sound up - from a gesture, or unprompted on a display that has been
-   * through the gate before. The unprompted attempt is worth making: a page
-   * that plays sound day after day earns the right to do it without being
-   * asked, and a display launched as an installed app or with the autoplay
-   * policy relaxed has it outright. When it is refused nothing is lost - the
-   * times still show, the banner asks for a touch, and any gesture recovers it.
+   * through the gate before. The unprompted attempt is worth making where a
+   * page that plays sound daily earns the right to do it unasked, or where the
+   * display runs as an installed app. iOS grants neither, so there the banner
+   * is the plan: it asks for one touch instead of failing silently.
    */
   async arm() {
     if (!this.ctx || this.ctx.state === 'closed') this.open();
@@ -293,16 +340,18 @@ const audio = {
         blip.start();
       }
     }
+    if (isIOS) {
+      this.startElementKeepAlive();
+      this.keepAliveEl?.play().catch(() => {});
+    }
     await this.armElements();
     return this.live();
   },
 
   /**
-   * The second way out. An <audio> element reaches the same speakers by a
-   * different route through the browser, and survives some of what kills a Web
-   * Audio graph. Unlocking it costs one silent play() inside a gesture we are
-   * already in, so it is armed alongside the context and only ever used if the
-   * context cannot be brought back.
+   * Unlocking the recordings costs one silent play() inside a gesture we are
+   * already in. Done up front, because the first time an element is asked to
+   * play must not be the moment a prayer is due.
    */
   async armElements() {
     for (const el of new Set(Object.values(this.elements))) {
@@ -314,33 +363,56 @@ const audio = {
         el.currentTime = 0;
         this.elementsArmed = true;
       } catch {
-        // Still locked. The Web Audio path is the primary one anyway.
+        // Still locked. The banner asks for the touch that lifts it.
       }
     }
   },
 
+  /**
+   * Finds out which recordings exist without downloading them. Nothing is
+   * decoded here: the element path needs no decode at all, and the Web Audio
+   * fallback decodes only if it is ever actually reached.
+   */
   async preload() {
-    const files = { normal: 'audio/adhan.mp3', fajr: 'audio/adhan-fajr.mp3' };
     await Promise.all(
-      Object.entries(files).map(async ([key, url]) => {
+      Object.entries(AUDIO_FILES).map(async ([key, url]) => {
         try {
-          const res = await fetch(url, { cache: 'force-cache' });
-          if (!res.ok) throw new Error(String(res.status));
-          this.buffers[key] = await this.ctx.decodeAudioData(await res.arrayBuffer());
+          const res = await fetch(url, { method: 'HEAD' });
+          if (!res.ok) return;
+          this.available[key] = true;
           const el = new Audio(url);
           el.preload = 'auto';
           this.elements[key] = el;
         } catch {
-          // Missing, undecodable, or no Web Audio at all: covered by the
-          // fallbacks below and reported in the status bar.
+          // Offline, or no such recording. Covered by the fallbacks below and
+          // reported in the status bar.
         }
       }),
     );
     // One recording is enough; Fajr falls back to the regular adhan.
-    this.hasOwnFajr = Boolean(this.buffers.fajr);
-    if (!this.buffers.fajr) this.buffers.fajr = this.buffers.normal;
+    this.hasOwnFajr = this.available.fajr;
     if (!this.elements.fajr) this.elements.fajr = this.elements.normal;
     await this.armElements();
+    describeMedia();
+  },
+
+  /**
+   * Decodes on demand, for the Web Audio fallback only. The cost of holding
+   * the result is the reason the element path goes first, so it is paid at the
+   * point it buys something and not before.
+   */
+  async ensureBuffer(kind) {
+    if (this.buffers[kind]) return this.buffers[kind];
+    const key = this.available[kind] ? kind : 'normal';
+    if (!this.available[key] || !this.ctx) return null;
+    try {
+      const res = await fetch(AUDIO_FILES[key], { cache: 'force-cache' });
+      if (!res.ok) throw new Error(String(res.status));
+      this.buffers[kind] = await this.ctx.decodeAudioData(await res.arrayBuffer());
+    } catch {
+      // Undecodable or gone: the chime below still announces the prayer.
+    }
+    return this.buffers[kind];
   },
 
   /**
@@ -363,6 +435,7 @@ const audio = {
    */
   check() {
     if (!this.ctx || this.ctx.state === 'closed') this.open();
+    if (isIOS && this.keepAliveEl?.paused) this.keepAliveEl.play().catch(() => {});
     if (!this.ctx) return;
 
     if (this.ctx.state !== 'running') {
@@ -382,15 +455,14 @@ const audio = {
     try {
       this.ctx.resume()?.catch?.(() => {});
     } catch {
-      // Needs a gesture - the banner asks for one and any click delivers it.
+      // Needs a gesture - the banner asks for one and any touch delivers it.
     }
   },
 
   /**
-   * Replaces a context that is running on paper and dead in fact. The decoded
-   * buffers outlive it - an AudioBuffer belongs to no context in particular -
-   * so the adhan is ready again straight away, without a fetch at the worst
-   * possible moment.
+   * Replaces a context that is running on paper and dead in fact. Anything
+   * already decoded outlives it - an AudioBuffer belongs to no context in
+   * particular - so nothing has to be fetched again.
    */
   recycle() {
     const dead = this.ctx;
@@ -405,35 +477,16 @@ const audio = {
 
   /**
    * Resolves to true only once sound is actually on its way out, through
-   * whichever path still works.
+   * whichever path still works. The element goes first; Web Audio is what
+   * catches the case where the element is refused.
    */
   async play(kind, volume) {
     this.stop();
-
-    if (await this.ready()) {
-      const buffer = this.buffers[kind] ?? this.buffers.normal;
-      const gain = this.ctx.createGain();
-      gain.gain.value = volume;
-      gain.connect(this.ctx.destination);
-
-      this.viaElement = false;
-      if (!buffer) {
-        this.playing = this.chime(gain);
-        return true;
-      }
-
-      const source = this.ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(gain);
-      source.start();
-      this.playing = source;
-      return true;
-    }
-
-    return this.playElement(kind, volume);
+    const started = (await this.playElement(kind, volume)) || (await this.playBuffer(kind, volume));
+    if (started) this.notePlayed();
+    return started;
   },
 
-  /** Last resort: Web Audio could not be revived, so try the other path out. */
   async playElement(kind, volume) {
     const el = this.elements[kind] ?? this.elements.normal;
     if (!el) return false;
@@ -447,6 +500,28 @@ const audio = {
     } catch {
       return false;
     }
+  },
+
+  async playBuffer(kind, volume) {
+    if (!(await this.ready())) return false;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = volume;
+    gain.connect(this.ctx.destination);
+    this.viaElement = false;
+
+    const buffer = await this.ensureBuffer(kind);
+    if (!buffer) {
+      this.playing = this.chime(gain);
+      return true;
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(gain);
+    source.start();
+    this.playing = source;
+    return true;
   },
 
   /**
@@ -464,6 +539,21 @@ const audio = {
       }
     }
     return this.ctx.state === 'running' && this.stalls < STALL_TICKS;
+  },
+
+  /**
+   * Remembered across reloads, because the question the morning after a silent
+   * prayer is always the same: did it play and nobody heard it, or did it never
+   * play? Guessing at that is what cost the most time here.
+   */
+  notePlayed() {
+    const now = viennaNow();
+    this.lastPlayed = `${now.date} ${two(now.h)}:${two(now.m)}`;
+    try {
+      localStorage.setItem(LAST_PLAYED_KEY, this.lastPlayed);
+    } catch {
+      // Not persisted; the running session still shows it.
+    }
   },
 
   /**
@@ -501,6 +591,58 @@ const audio = {
     this.playing = null;
   },
 };
+
+/**
+ * A one-second WAV of near-silence, as a blob URL. Same level as the Web Audio
+ * keep-alive and for the same reason: quiet enough that nobody in the room
+ * hears it, loud enough that the platform does not write the stream off as
+ * silence and hand the audio session back.
+ */
+function quietWavUrl() {
+  const rate = 8000;
+  const samples = rate;
+  const bytes = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(bytes);
+  const ascii = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + samples * 2, true);
+  ascii(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true); // PCM header length
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true); // bytes per second
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  ascii(36, 'data');
+  view.setUint32(40, samples * 2, true);
+
+  const peak = Math.round(32767 * KEEPALIVE_LEVEL);
+  for (let i = 0; i < samples; i += 1) {
+    view.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * KEEPALIVE_HZ * i) / rate) * peak), true);
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+}
+
+/**
+ * Tells the OS what is playing, so a lock screen or a media key acts on the
+ * adhan rather than on whatever the device last played.
+ */
+function describeMedia() {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'Azan',
+      artist: 'Azaming',
+      album: dataMeta.place ?? 'Wien',
+    });
+  } catch {
+    // Optional decoration; nothing depends on it.
+  }
+}
 
 // ---------------------------------------------------------------- settings
 
@@ -774,11 +916,15 @@ function showStatus() {
   const latest = dataMeta.months?.at(-1) ?? '';
   const source = `Quelle: IGGÖ (derislam.at) · Daten bis ${latest.slice(-7) || 'unbekannt'}`;
 
+  // The morning after a silent prayer, this is the only question worth
+  // answering, and it cannot be reconstructed from anything else on screen.
+  const last = audio.lastPlayed ? ` · Azan zuletzt ${audio.lastPlayed}` : ' · Azan noch nie gespielt';
+
   const live = audio.live();
   el('alarm').hidden = live;
 
   if (!live) {
-    setStatus('Ton ist blockiert — bitte einmal auf die Seite tippen.', 'error');
+    setStatus(`Ton ist blockiert — bitte einmal auf die Seite tippen.${last}`, 'error');
     return;
   }
   if (dataProblem) {
@@ -787,20 +933,23 @@ function showStatus() {
   }
   // Only the regular adhan decides whether we are on the stand-in chime; a
   // missing Fajr recording just means Fajr reuses the regular one.
-  if (!audio.buffers.normal) {
+  if (!audio.available.normal) {
     setStatus('Ersatzton aktiv — keine Azan-Aufnahme in public/audio/.', 'warn');
     return;
   }
-  if (!audio.hasOwnFajr) {
-    setStatus(`${source} · Fadjr nutzt die reguläre Aufnahme`);
-    return;
-  }
-  setStatus(source);
+  const fajr = audio.hasOwnFajr ? '' : ' · Fadjr nutzt die reguläre Aufnahme';
+  setStatus(`${source}${fajr}${last}`);
 }
 
 async function start() {
   buildSlots();
   buildSettingsUi();
+
+  try {
+    audio.lastPlayed = localStorage.getItem(LAST_PLAYED_KEY);
+  } catch {
+    // Private mode: the line just reads "noch nie gespielt" until one plays.
+  }
 
   try {
     await loadData();
