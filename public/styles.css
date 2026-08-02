@@ -91,6 +91,44 @@ body {
   filter: brightness(1.1);
 }
 
+/* ---------- sound alarm ---------- */
+
+/*
+ * Deliberately the loudest thing on the screen. Every other fault degrades the
+ * display; this one makes it useless, and it is invisible until a prayer
+ * passes unannounced.
+ */
+.alarm {
+  width: 100%;
+  padding: 0.9rem 1.25rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: #7a1f1f;
+  color: #ffe9e9;
+  font: inherit;
+  font-size: clamp(1rem, 2vw, 1.5rem);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  animation: alarm-pulse 2s ease-in-out infinite;
+}
+
+.alarm[hidden] {
+  display: none;
+}
+
+@keyframes alarm-pulse {
+  50% {
+    background: #a32a2a;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alarm {
+    animation: none;
+  }
+}
+
 /* ---------- layout ---------- */
 
 .app {

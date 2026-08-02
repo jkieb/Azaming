@@ -27,4 +27,6 @@ two to four minutes, roughly 2–4 MB, which is well inside the 1 GB GitHub Page
 limit.
 
 The file is decoded once at startup and held in memory, so playback does not
-depend on the network at the moment it matters.
+depend on the network at the moment it matters. It is also loaded a second time
+into an `<audio>` element kept as a fallback path to the speakers, so a few
+megabytes is the sensible ceiling.

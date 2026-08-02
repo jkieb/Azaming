@@ -4,8 +4,9 @@
  * Built for a tab that stays open on a wall display. Two consequences shape
  * the whole file:
  *
- *   - Audio needs a user gesture before it will ever play, so nothing starts
- *     until the gate is dismissed once.
+ *   - Sound is a state that has to be held, not a switch that is flipped once.
+ *     See the audio section: the gesture only opens the door, and everything
+ *     that closes it again afterwards is what actually keeps a display quiet.
  *   - All time arithmetic happens in Europe/Vienna wall-clock seconds rather
  *     than Date objects, so the machine's own timezone and clock offset cannot
  *     shift when the adhan fires.
@@ -35,6 +36,26 @@ const FIRE_WINDOW_S = 60;
 const CATCH_UP_S = 300;
 
 const SETTINGS_KEY = 'azaming.settings.v1';
+
+/** Set once the gate has been passed, so a reload never lands back on it. */
+const ARMED_KEY = 'azaming.armed.v1';
+
+/**
+ * The keep-alive tone: 60 Hz at roughly -60 dBFS. Browsers count a stream
+ * quieter than about -72 dBFS as silence, so this is above the line that
+ * decides whether the tab is "playing audio", and far below anything a person
+ * in the room can hear - at 60 Hz most of all, where the ear is least
+ * sensitive. One second holds exactly 60 cycles, so the buffer loops seamlessly.
+ */
+const KEEPALIVE_HZ = 60;
+const KEEPALIVE_LEVEL = 0.001;
+
+/**
+ * Ticks of a frozen audio clock before the output is treated as dead. Several
+ * ticks can share one timestamp when a tab is woken and fires them back to
+ * back, so this is deliberately a good ten seconds rather than one reading.
+ */
+const STALL_TICKS = 10;
 
 const el = (id) => document.getElementById(id);
 
@@ -174,26 +195,128 @@ function ensureData(now, force = false) {
 // ---------------------------------------------------------------- audio
 
 /**
- * Web Audio rather than <audio>: the buffer is decoded once up front, so
- * playback at the prayer time starts immediately instead of waiting on a
- * network fetch that may fail exactly when it matters.
+ * Switching the sound on is not a moment, it is a state that has to be held.
+ *
+ * A gesture is only needed to open an AudioContext. What keeps a display quiet
+ * for months is everything that happens afterwards, and none of it announces
+ * itself:
+ *
+ *   - A reload - a browser restart, a crash, a machine reboot, a renderer the
+ *     OS killed for memory - used to put the page back behind the gate, where
+ *     it waited for someone to walk past. That is the difference between
+ *     missing one prayer and missing every prayer until a human notices.
+ *   - A tab producing no sound is throttled to about one timer a minute and may
+ *     be frozen outright; a tab that is producing sound is left alone by both.
+ *   - Screen sleep, an audio device change or the OS pausing the tab suspend
+ *     the context. Worse, after a system sleep it can come back reporting
+ *     "running" while its clock stands still and nothing reaches the speakers -
+ *     sources started into it are accepted and silently dropped.
+ *
+ * So: the permission is remembered and re-taken unprompted, the context is held
+ * open by an inaudible keep-alive tone, and that tone doubles as the health
+ * probe - while the audio clock advances, the output device is demonstrably
+ * alive. When it stops, the context is rebuilt rather than played into. An
+ * <audio> element is kept armed as a second, independent path to the speakers.
+ *
+ * Web Audio stays the primary path because the recording is decoded once up
+ * front: playback at the prayer time starts immediately, with no fetch and no
+ * decode at the one moment that matters.
  */
 const audio = {
   ctx: null,
   buffers: { normal: null, fajr: null },
+  elements: { normal: null, fajr: null },
+  elementsArmed: false,
   hasOwnFajr: false,
-  missing: [],
+  keepAlive: null,
   playing: null,
+  viaElement: false,
 
-  async unlock() {
-    this.ctx = new (window.AudioContext ?? window.webkitAudioContext)();
+  /** Last audio-clock reading and how many ticks it has failed to advance. */
+  clock: -1,
+  stalls: 0,
+
+  /** Opens a context and starts holding it open. Also used to replace a dead one. */
+  open() {
+    const Ctx = window.AudioContext ?? window.webkitAudioContext;
+    if (!Ctx) return;
+    this.ctx = new Ctx();
     this.ctx.addEventListener('statechange', () => showStatus());
-    await this.ctx.resume();
-    // A zero-length blip inside the gesture is what actually lifts the block.
-    const silent = this.ctx.createBufferSource();
-    silent.buffer = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
-    silent.connect(this.ctx.destination);
-    silent.start();
+    this.clock = -1;
+    this.stalls = 0;
+    this.startKeepAlive();
+  },
+
+  /**
+   * A tone nobody can hear, running for as long as the app does. It keeps the
+   * tab counted as playing audio - which keeps its timers at one a second
+   * instead of one a minute, and keeps the browser from freezing it - and it
+   * keeps the output device open instead of letting it be torn down and
+   * re-acquired around every prayer.
+   */
+  startKeepAlive() {
+    const rate = this.ctx.sampleRate;
+    const buffer = this.ctx.createBuffer(1, rate, rate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) {
+      data[i] = Math.sin((2 * Math.PI * KEEPALIVE_HZ * i) / rate) * KEEPALIVE_LEVEL;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(this.ctx.destination);
+    source.start();
+    this.keepAlive = source;
+  },
+
+  /**
+   * Brings sound up - from a gesture, or unprompted on a display that has been
+   * through the gate before. The unprompted attempt is worth making: a page
+   * that plays sound day after day earns the right to do it without being
+   * asked, and a display launched as an installed app or with the autoplay
+   * policy relaxed has it outright. When it is refused nothing is lost - the
+   * times still show, the banner asks for a touch, and any gesture recovers it.
+   */
+  async arm() {
+    if (!this.ctx || this.ctx.state === 'closed') this.open();
+    if (this.ctx) {
+      try {
+        await this.ctx.resume();
+      } catch {
+        // Refused without a gesture; the banner asks for one.
+      }
+      // A zero-length blip inside the gesture is what actually lifts the block.
+      if (this.ctx.state === 'running') {
+        const blip = this.ctx.createBufferSource();
+        blip.buffer = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
+        blip.connect(this.ctx.destination);
+        blip.start();
+      }
+    }
+    await this.armElements();
+    return this.live();
+  },
+
+  /**
+   * The second way out. An <audio> element reaches the same speakers by a
+   * different route through the browser, and survives some of what kills a Web
+   * Audio graph. Unlocking it costs one silent play() inside a gesture we are
+   * already in, so it is armed alongside the context and only ever used if the
+   * context cannot be brought back.
+   */
+  async armElements() {
+    for (const el of new Set(Object.values(this.elements))) {
+      if (!el || el === this.playing) continue;
+      try {
+        el.volume = 0;
+        await el.play();
+        el.pause();
+        el.currentTime = 0;
+        this.elementsArmed = true;
+      } catch {
+        // Still locked. The Web Audio path is the primary one anyway.
+      }
+    }
   },
 
   async preload() {
@@ -204,58 +327,143 @@ const audio = {
           const res = await fetch(url, { cache: 'force-cache' });
           if (!res.ok) throw new Error(String(res.status));
           this.buffers[key] = await this.ctx.decodeAudioData(await res.arrayBuffer());
+          const el = new Audio(url);
+          el.preload = 'auto';
+          this.elements[key] = el;
         } catch {
-          this.missing.push(url);
+          // Missing, undecodable, or no Web Audio at all: covered by the
+          // fallbacks below and reported in the status bar.
         }
       }),
     );
     // One recording is enough; Fajr falls back to the regular adhan.
     this.hasOwnFajr = Boolean(this.buffers.fajr);
     if (!this.buffers.fajr) this.buffers.fajr = this.buffers.normal;
+    if (!this.elements.fajr) this.elements.fajr = this.elements.normal;
+    await this.armElements();
   },
 
   /**
-   * Resolves to true only once sound is actually on its way out. A suspended
-   * context accepts sources and plays nothing, so the state is checked rather
-   * than assumed - that silence is otherwise invisible until someone notices
-   * the adhan never came.
+   * Would a prayer starting right now be heard? Not "did we call start()" -
+   * a suspended context accepts sources and plays nothing, and a context left
+   * behind by a system sleep does the same while still calling itself running.
+   */
+  live() {
+    if (!this.ctx) return this.elementsArmed;
+    return this.ctx.state === 'running' && this.stalls < STALL_TICKS;
+  },
+
+  /**
+   * Run on every tick, before anything can be due. The audio clock is the
+   * honest signal: while the keep-alive tone renders it advances, and if it
+   * stops while the context still claims to be running then the device is gone
+   * and everything started from here on would be silent. That failure used to
+   * stay invisible until a prayer passed without a sound, so it is repaired
+   * here instead of being discovered there.
+   */
+  check() {
+    if (!this.ctx || this.ctx.state === 'closed') this.open();
+    if (!this.ctx) return;
+
+    if (this.ctx.state !== 'running') {
+      this.clock = -1;
+      this.stalls = 0;
+      this.resume();
+      return;
+    }
+
+    const now = this.ctx.currentTime;
+    this.stalls = now > this.clock ? 0 : this.stalls + 1;
+    this.clock = now;
+    if (this.stalls >= STALL_TICKS) this.recycle();
+  },
+
+  resume() {
+    try {
+      this.ctx.resume()?.catch?.(() => {});
+    } catch {
+      // Needs a gesture - the banner asks for one and any click delivers it.
+    }
+  },
+
+  /**
+   * Replaces a context that is running on paper and dead in fact. The decoded
+   * buffers outlive it - an AudioBuffer belongs to no context in particular -
+   * so the adhan is ready again straight away, without a fetch at the worst
+   * possible moment.
+   */
+  recycle() {
+    const dead = this.ctx;
+    this.open();
+    try {
+      dead.close()?.catch?.(() => {});
+    } catch {
+      // Already gone; nothing to release.
+    }
+    if (this.ctx !== dead) this.resume();
+  },
+
+  /**
+   * Resolves to true only once sound is actually on its way out, through
+   * whichever path still works.
    */
   async play(kind, volume) {
     this.stop();
-    if (!(await this.ready())) return false;
 
-    const buffer = this.buffers[kind] ?? this.buffers.normal;
-    const gain = this.ctx.createGain();
-    gain.gain.value = volume;
-    gain.connect(this.ctx.destination);
+    if (await this.ready()) {
+      const buffer = this.buffers[kind] ?? this.buffers.normal;
+      const gain = this.ctx.createGain();
+      gain.gain.value = volume;
+      gain.connect(this.ctx.destination);
 
-    if (!buffer) {
-      this.playing = this.chime(gain);
+      this.viaElement = false;
+      if (!buffer) {
+        this.playing = this.chime(gain);
+        return true;
+      }
+
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gain);
+      source.start();
+      this.playing = source;
       return true;
     }
 
-    const source = this.ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(gain);
-    source.start();
-    this.playing = source;
-    return true;
+    return this.playElement(kind, volume);
+  },
+
+  /** Last resort: Web Audio could not be revived, so try the other path out. */
+  async playElement(kind, volume) {
+    const el = this.elements[kind] ?? this.elements.normal;
+    if (!el) return false;
+    try {
+      el.currentTime = 0;
+      el.volume = volume;
+      await el.play();
+      this.playing = el;
+      this.viaElement = true;
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   /**
    * The context is suspended again by screen sleep, an audio device change or
    * the OS pausing the tab. resume() is enough in most cases; where the browser
-   * insists on a fresh gesture it stays suspended and the status bar says so.
+   * insists on a fresh gesture it stays suspended and the banner says so.
    */
   async ready() {
     if (!this.ctx) return false;
-    if (this.ctx.state === 'running') return true;
-    try {
-      await this.ctx.resume();
-    } catch {
-      // Needs a user gesture - handled by the click listener on the page.
+    if (this.ctx.state !== 'running') {
+      try {
+        await this.ctx.resume();
+      } catch {
+        // Needs a user gesture - handled by the listeners on the page.
+      }
     }
-    return this.ctx.state === 'running';
+    return this.ctx.state === 'running' && this.stalls < STALL_TICKS;
   },
 
   /**
@@ -285,7 +493,8 @@ const audio = {
 
   stop() {
     try {
-      this.playing?.stop();
+      if (this.viaElement) this.playing?.pause();
+      else this.playing?.stop();
     } catch {
       // Already finished - nothing to stop.
     }
@@ -435,6 +644,11 @@ let lastTick = null;
 function render() {
   const now = viennaNow();
 
+  // Before anything can be due: a context that has died is rebuilt here, so a
+  // prayer in this same tick plays into an output that was just proved alive.
+  audio.check();
+  el('alarm').hidden = audio.live();
+
   el('clock').firstChild.nodeValue = `${two(now.h)}:${two(now.m)}`;
   el('seconds').textContent = `:${two(now.s)}`;
 
@@ -560,12 +774,15 @@ function showStatus() {
   const latest = dataMeta.months?.at(-1) ?? '';
   const source = `Quelle: IGGÖ (derislam.at) · Daten bis ${latest.slice(-7) || 'unbekannt'}`;
 
-  if (dataProblem) {
-    setStatus(dataProblem, 'error');
+  const live = audio.live();
+  el('alarm').hidden = live;
+
+  if (!live) {
+    setStatus('Ton ist blockiert — bitte einmal auf die Seite tippen.', 'error');
     return;
   }
-  if (audio.ctx && audio.ctx.state !== 'running') {
-    setStatus('Ton ist blockiert — bitte einmal auf die Seite klicken.', 'error');
+  if (dataProblem) {
+    setStatus(dataProblem, 'error');
     return;
   }
   // Only the regular adhan decides whether we are on the stand-in chime; a
@@ -582,9 +799,6 @@ function showStatus() {
 }
 
 async function start() {
-  el('gate').hidden = true;
-  el('app').hidden = false;
-
   buildSlots();
   buildSettingsUi();
 
@@ -604,11 +818,39 @@ async function start() {
   setInterval(render, 1000);
 }
 
-// A context the browser suspended is resumed by any gesture on the page, so
-// the recovery the status bar asks for works wherever someone clicks.
-document.addEventListener('click', () => {
-  audio.ready().then(showStatus);
-});
+/**
+ * Whether this display has ever been through the gate. Remembering it is what
+ * turns the gate from a thing that blocks every reload into a thing that is
+ * seen once, on the day the display is set up.
+ */
+function wasArmed() {
+  try {
+    return localStorage.getItem(ARMED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+async function boot() {
+  // Ahead of the await, so an armed display never flashes the gate on reload.
+  el('gate').hidden = true;
+  el('app').hidden = false;
+  try {
+    await audio.arm();
+  } catch {
+    // Continue anyway: the times are still worth showing without sound.
+  }
+  start();
+}
+
+// A blocked context is lifted by any gesture on the page, so the recovery the
+// banner asks for works wherever someone touches the screen - and it re-arms
+// the whole path, not just the context, since the element may be locked too.
+const rearm = () => {
+  if (!el('app').hidden) audio.arm().then(showStatus, () => {});
+};
+document.addEventListener('pointerdown', rearm);
+document.addEventListener('keydown', rearm);
 
 // Coming back to the tab is the other moment worth re-checking: both the wake
 // lock and the audio context are dropped while it is hidden.
@@ -616,14 +858,19 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') audio.ready().then(showStatus);
 });
 
-el('enable').addEventListener('click', async () => {
+el('enable').addEventListener('click', () => {
   try {
-    await audio.unlock();
+    localStorage.setItem(ARMED_KEY, '1');
   } catch {
-    // Continue anyway: the times are still worth showing without sound.
+    // Private mode: the gate comes back on the next load, nothing else breaks.
   }
-  start();
+  boot();
 });
+
+// The display was armed on some earlier visit, so it starts itself. If the
+// browser refuses to play unprompted the banner says so - which is still far
+// better than a page sitting behind a button nobody is there to press.
+if (wasArmed()) boot();
 
 el('test').addEventListener('click', () => {
   // The test button is also the check for a blocked context, so it reports.
