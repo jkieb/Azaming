@@ -1,10 +1,11 @@
 {
  "place": "Wien",
  "timezone": "Europe/Vienna",
- "updatedAt": "2026-08-01T15:58:53.715Z",
+ "updatedAt": "2026-09-01T03:02:59.237Z",
  "months": [
   "wien-2026-08",
   "wien-2026-09",
-  "wien-2026-10"
+  "wien-2026-10",
+  "wien-2026-11"
  ]
 }
