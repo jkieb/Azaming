@@ -154,7 +154,9 @@ chime, and says so in the status bar.
 ### Deployment
 
 `.github/workflows/deploy.yml` publishes `public/` to GitHub Pages on every
-change, including the monthly data commit. Set *Settings → Pages → Source* to
+change. The monthly data commit is pushed with `GITHUB_TOKEN`, which GitHub
+does not let trigger other workflows, so `update-times.yml` starts the deploy
+itself via `workflow_dispatch` after pushing. Set *Settings → Pages → Source* to
 **GitHub Actions** once; there is nothing else to configure.
 
 ## Prayer time data
