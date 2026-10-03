@@ -1,20 +1,33 @@
 /*
  * Sized for a wall display first: read at a distance, no hover affordances,
- * dark by default so a screen left on overnight is not a lamp.
+ * dark by default so a screen left on overnight is not a lamp. The backdrop is
+ * the eight-pointed star lattice of mosque tilework, kept faint enough that it
+ * reads as texture and never competes with the times.
  */
 
 :root {
-  --bg: #0b1413;
-  --surface: #12201e;
-  --surface-lift: #1a2c29;
-  --ink: #eef5f3;
-  --ink-dim: #8fa9a4;
-  --accent: #4ecfa8;
-  --accent-ink: #06231b;
-  --line: #24403b;
+  --bg: #0b1a20;
+  --bg-deep: #071216;
+  --card: rgba(255, 255, 255, 0.045);
+  --card-lift: rgba(217, 184, 114, 0.1);
+  --card-edge: rgba(255, 255, 255, 0.07);
+  --ink: #f4efe3;
+  --ink-dim: #9fb0ab;
+  --gold: #d9b872;
+  --gold-soft: rgba(217, 184, 114, 0.35);
+  --accent: var(--gold);
+  --accent-ink: #1d1505;
+  --line: rgba(255, 255, 255, 0.08);
+  --warn: #f0c878;
+  --error: #f2a0a0;
 
   --pad: clamp(1rem, 2.5vw, 2.5rem);
-  --radius: 14px;
+  --radius: 28px;
+  --radius-sm: 18px;
+  --shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.75);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke-linejoin='round'%3E%3Cpath d='M170.7 170.7L120.7 150.0L100.0 200.0M100.0 200.0L79.3 150.0L29.3 170.7M29.3 170.7L50.0 120.7L-0.0 100.0M-0.0 100.0L50.0 79.3L29.3 29.3M29.3 29.3L79.3 50.0L100.0 0.0M100.0 0.0L120.7 50.0L170.7 29.3M170.7 29.3L150.0 79.3L200.0 100.0M200.0 100.0L150.0 120.7L170.7 170.7M29.3 29.3L-0.0 17.2L-29.3 29.3M-29.3 29.3L-17.2 0.0L-29.3 -29.3M-29.3 -29.3L0.0 -17.2L29.3 -29.3M29.3 -29.3L17.2 -0.0L29.3 29.3M229.3 29.3L200.0 17.2L170.7 29.3M170.7 29.3L182.8 -0.0L170.7 -29.3M170.7 -29.3L200.0 -17.2L229.3 -29.3M229.3 -29.3L217.2 -0.0L229.3 29.3M29.3 229.3L-0.0 217.2L-29.3 229.3M-29.3 229.3L-17.2 200.0L-29.3 170.7M-29.3 170.7L0.0 182.8L29.3 170.7M29.3 170.7L17.2 200.0L29.3 229.3M229.3 229.3L200.0 217.2L170.7 229.3M170.7 229.3L182.8 200.0L170.7 170.7M170.7 170.7L200.0 182.8L229.3 170.7M229.3 170.7L217.2 200.0L229.3 229.3' stroke='rgba(217,184,114,0.16)' stroke-width='7'/%3E%3Cpath d='M170.7 170.7L120.7 150.0L100.0 200.0M100.0 200.0L79.3 150.0L29.3 170.7M29.3 170.7L50.0 120.7L-0.0 100.0M-0.0 100.0L50.0 79.3L29.3 29.3M29.3 29.3L79.3 50.0L100.0 0.0M100.0 0.0L120.7 50.0L170.7 29.3M170.7 29.3L150.0 79.3L200.0 100.0M200.0 100.0L150.0 120.7L170.7 170.7M29.3 29.3L-0.0 17.2L-29.3 29.3M-29.3 29.3L-17.2 0.0L-29.3 -29.3M-29.3 -29.3L0.0 -17.2L29.3 -29.3M29.3 -29.3L17.2 -0.0L29.3 29.3M229.3 29.3L200.0 17.2L170.7 29.3M170.7 29.3L182.8 -0.0L170.7 -29.3M170.7 -29.3L200.0 -17.2L229.3 -29.3M229.3 -29.3L217.2 -0.0L229.3 29.3M29.3 229.3L-0.0 217.2L-29.3 229.3M-29.3 229.3L-17.2 200.0L-29.3 170.7M-29.3 170.7L0.0 182.8L29.3 170.7M29.3 170.7L17.2 200.0L29.3 229.3M229.3 229.3L200.0 217.2L170.7 229.3M170.7 229.3L182.8 200.0L170.7 170.7M170.7 170.7L200.0 182.8L229.3 170.7M229.3 170.7L217.2 200.0L229.3 229.3' stroke='%230b1a20' stroke-width='3.5'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 * {
@@ -28,11 +41,33 @@ body {
 }
 
 body {
-  background: var(--bg);
+  position: relative;
+  background-color: var(--bg);
   color: var(--ink);
   font: 400 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
+}
+
+/* Tilework, then a vignette over it: the lattice fades out behind the text. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+body::before {
+  background: var(--pattern) center / 220px 220px repeat, var(--bg);
+}
+
+body::after {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgba(11, 26, 32, 0.92), rgba(11, 26, 32, 0.55) 60%, transparent),
+    radial-gradient(ellipse at 50% 120%, rgba(217, 184, 114, 0.08), transparent 55%),
+    linear-gradient(to bottom, transparent 70%, var(--bg-deep));
 }
 
 /* ---------- audio gate ---------- */
@@ -43,7 +78,6 @@ body {
   display: grid;
   place-items: center;
   padding: var(--pad);
-  background: radial-gradient(circle at 50% 35%, #14312a, var(--bg) 70%);
   text-align: center;
   z-index: 10;
 }
@@ -54,12 +88,33 @@ body {
 
 .gate-inner {
   max-width: 34rem;
+  padding: clamp(2rem, 5vw, 3.5rem) clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid var(--card-edge);
+  border-radius: 50% 50% var(--radius) var(--radius) / 9rem 9rem var(--radius) var(--radius);
+  background: rgba(11, 26, 32, 0.78);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.gate-star,
+.hero-star {
+  display: block;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 0.75rem;
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  opacity: 0.85;
 }
 
 .gate h1 {
   margin: 0;
   font-size: clamp(2.5rem, 7vw, 4.5rem);
-  letter-spacing: -0.02em;
+  font-weight: 300;
+  letter-spacing: 0.01em;
 }
 
 .gate p {
@@ -74,21 +129,24 @@ body {
 }
 
 .enable {
-  margin-top: 2rem;
-  padding: 1rem 2.5rem;
+  margin-top: 1.5rem;
+  padding: 1rem 2.75rem;
   border: 0;
   border-radius: 999px;
-  background: var(--accent);
+  background: linear-gradient(180deg, #e6c98a, var(--gold));
   color: var(--accent-ink);
   font: inherit;
   font-size: clamp(1.05rem, 2vw, 1.4rem);
   font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 10px 30px -12px rgba(217, 184, 114, 0.7);
+  transition: transform 0.3s var(--ease), filter 0.3s var(--ease);
 }
 
 .enable:hover,
 .enable:focus-visible {
-  filter: brightness(1.1);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
 
 /* ---------- sound alarm ---------- */
@@ -102,7 +160,7 @@ body {
   width: 100%;
   padding: 0.9rem 1.25rem;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: #7a1f1f;
   color: #ffe9e9;
   font: inherit;
@@ -123,19 +181,15 @@ body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .alarm {
-    animation: none;
-  }
-}
-
 /* ---------- layout ---------- */
 
 .app {
   display: flex;
   flex-direction: column;
-  gap: var(--pad);
+  gap: clamp(1rem, 2.5vh, 2rem);
   min-height: 100%;
+  max-width: 90rem;
+  margin: 0 auto;
   padding: var(--pad);
 }
 
@@ -144,126 +198,212 @@ body {
 }
 
 .head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pad);
-  align-items: flex-start;
-  justify-content: space-between;
+  text-align: center;
 }
 
 .clock {
-  font-size: clamp(3.5rem, 11vw, 8rem);
-  font-weight: 300;
+  font-size: clamp(4rem, 14vw, 10rem);
+  font-weight: 200;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
 }
 
-.seconds {
-  color: var(--ink-dim);
-  font-size: 0.4em;
-}
-
-.date {
-  margin-top: 0.6rem;
-  font-size: clamp(1rem, 2vw, 1.5rem);
+.dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.75rem;
+  font-size: clamp(1rem, 1.9vw, 1.4rem);
+  font-weight: 300;
 }
 
 .hijri {
-  color: var(--ink-dim);
-  font-size: clamp(0.9rem, 1.6vw, 1.2rem);
+  color: var(--gold);
 }
 
-.head-right {
-  text-align: right;
-  margin-left: auto;
+.hijri:empty,
+.hijri:empty ~ .dot,
+.dot:has(+ .hijri:empty) {
+  display: none;
+}
+
+@media (max-width: 36rem) {
+  .dates {
+    flex-direction: column;
+  }
+
+  .dot {
+    display: none;
+  }
+}
+
+.dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--gold-soft);
+  transform: rotate(45deg);
+}
+
+/* ---------- next prayer ---------- */
+
+.hero {
+  align-self: center;
+  width: min(100%, 34rem);
+  padding: clamp(1.5rem, 3.5vw, 2.5rem) clamp(1.25rem, 3vw, 2.5rem) clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--gold-soft);
+  border-radius: 50% 50% var(--radius) var(--radius) / 8rem 8rem var(--radius) var(--radius);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(217, 184, 114, 0.16), transparent 70%),
+    rgba(11, 26, 32, 0.6);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-align: center;
+}
+
+.hero-star {
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-bottom: 0.5rem;
 }
 
 .next-label {
   color: var(--ink-dim);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
 }
 
 .next-name {
-  font-size: clamp(1.5rem, 4vw, 2.75rem);
-  font-weight: 600;
-  color: var(--accent);
+  margin-top: 0.15rem;
+  color: var(--gold);
+  font-size: clamp(2rem, 5.5vw, 3.5rem);
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.next-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  justify-content: center;
+  margin-top: 0.35rem;
+  font-size: clamp(1.1rem, 2.4vw, 1.6rem);
+  font-weight: 300;
+}
+
+.next-at:empty {
+  display: none;
 }
 
 .countdown {
-  font-size: clamp(2rem, 6vw, 4rem);
-  font-weight: 300;
-  line-height: 1.1;
+  color: var(--ink-dim);
 }
 
 /* ---------- prayer times ---------- */
 
 .times {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.75rem;
+  /* 6, 3 or 2 across - never a ragged 4 + 2. */
+  grid-template-columns: repeat(2, 1fr);
+  gap: clamp(0.6rem, 1.2vw, 1rem);
   flex: 1;
   align-content: center;
 }
 
+@media (min-width: 40rem) {
+  .times {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 72rem) {
+  .times {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
 .slot {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: clamp(0.9rem, 2vw, 1.75rem);
-  border: 1px solid var(--line);
+  align-items: center;
+  gap: 0.4rem;
+  padding: clamp(1rem, 2.2vw, 1.75rem) 0.75rem;
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  text-align: center;
+  transition:
+    background 0.6s var(--ease),
+    border-color 0.6s var(--ease),
+    opacity 0.6s var(--ease),
+    transform 0.6s var(--ease);
 }
 
 .slot-name {
   color: var(--ink-dim);
   font-size: clamp(0.85rem, 1.3vw, 1.05rem);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 
 .slot-time {
-  font-size: clamp(1.75rem, 4.5vw, 3.25rem);
-  font-weight: 500;
+  font-size: clamp(1.75rem, 4.2vw, 3rem);
+  font-weight: 300;
   line-height: 1;
 }
 
 .slot-meta {
   min-height: 1.2em;
   color: var(--ink-dim);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 /* The next prayer is the one thing readable from across the room. */
 .slot.is-next {
-  border-color: var(--accent);
-  background: var(--surface-lift);
+  border-color: var(--gold-soft);
+  background: linear-gradient(180deg, var(--card-lift), rgba(217, 184, 114, 0.03));
+  box-shadow: var(--shadow), 0 0 0 1px rgba(217, 184, 114, 0.12), 0 0 40px -10px rgba(217, 184, 114, 0.35);
+  transform: translateY(-3px);
 }
 
 .slot.is-next .slot-name,
 .slot.is-next .slot-meta {
-  color: var(--accent);
+  color: var(--gold);
+}
+
+.slot.is-next .slot-time {
+  font-weight: 400;
 }
 
 .slot.is-past {
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
 /* Sunrise ends Fajr, it is not a prayer - shown, but never with an azan. */
+.slot.is-marker {
+  background: transparent;
+  box-shadow: none;
+  border-style: dashed;
+}
+
 .slot.is-marker .slot-time {
-  font-weight: 400;
   color: var(--ink-dim);
 }
 
 .slot.is-firing {
-  animation: pulse 1.4s ease-in-out infinite;
+  animation: pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes pulse {
   50% {
-    background: #22403a;
+    background: rgba(217, 184, 114, 0.22);
+    box-shadow: var(--shadow), 0 0 60px -6px rgba(217, 184, 114, 0.55);
   }
 }
 
@@ -275,21 +415,60 @@ body {
   gap: 1rem;
   align-items: center;
   justify-content: space-between;
-  padding-top: 1rem;
-  border-top: 1px solid var(--line);
+  padding: 0.75rem 0.25rem 0;
 }
 
 .status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0;
+  align-items: center;
   color: var(--ink-dim);
   font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+/* Parts set apart by the same small gold diamond as the date line. */
+.status-part + .status-part::before {
+  content: "";
+  display: inline-block;
+  width: 0.3rem;
+  height: 0.3rem;
+  margin: 0 0.75rem 0.15rem;
+  background: var(--gold-soft);
+  transform: rotate(45deg);
+  vertical-align: middle;
+}
+
+@media (max-width: 36rem) {
+  .foot {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .status {
+    flex-direction: column;
+  }
+
+  .status-part + .status-part::before {
+    display: none;
+  }
+}
+
+.volume-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.5rem;
 }
 
 .status.is-warn {
-  color: #f0c26b;
+  color: var(--warn);
 }
 
 .status.is-error {
-  color: #f08c8c;
+  color: var(--error);
 }
 
 .controls {
@@ -298,28 +477,34 @@ body {
 }
 
 .btn {
-  padding: 0.55rem 1.1rem;
-  border: 1px solid var(--line);
+  padding: 0.55rem 1.2rem;
+  border: 1px solid var(--card-edge);
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--card);
+  color: var(--ink-dim);
   font: inherit;
+  font-size: 0.9rem;
   cursor: pointer;
+  transition: color 0.3s var(--ease), border-color 0.3s var(--ease);
 }
 
 .btn:hover,
 .btn:focus-visible {
-  border-color: var(--accent);
+  border-color: var(--gold-soft);
+  color: var(--ink);
 }
 
 .settings {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
+  padding: 1.25rem;
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgba(11, 26, 32, 0.85);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .settings[hidden] {
@@ -331,7 +516,7 @@ body {
   margin: 0;
   padding: 0.75rem 1rem 1rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
 }
 
 .settings legend {
@@ -387,7 +572,7 @@ body {
 
 .log-line.is-late,
 .log-line.is-blocked {
-  color: #f08c8c;
+  color: var(--error);
 }
 
 .log-empty {
@@ -406,8 +591,18 @@ input[type="checkbox"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .alarm,
   .slot.is-firing {
     animation: none;
-    background: #22403a;
+  }
+
+  .slot.is-firing {
+    background: rgba(217, 184, 114, 0.22);
+  }
+
+  .slot,
+  .enable,
+  .btn {
+    transition: none;
   }
 }

@@ -20,6 +20,8 @@ on:
 permissions:
   contents: write
   issues: write
+  # To start the Pages deploy - see the Deploy step.
+  actions: write
 
 jobs:
   update:
@@ -56,6 +58,7 @@ jobs:
           node scripts/fetch-times.mjs --browser
 
       - name: Commit
+        id: commit
         if: steps.fetch.outcome == 'success' || steps.fetch_browser.outcome == 'success'
         run: |
           git config user.name  'github-actions[bot]'
@@ -68,9 +71,22 @@ jobs:
           git commit -m "chore(data): refresh prayer times for $PLACE"
           for delay in 0 2 4 8 16; do
             sleep $delay
-            git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            if git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME"; then
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           done
           exit 1
+
+      # A push made with GITHUB_TOKEN does not trigger other workflows, so the
+      # data commit above never reaches deploy.yml's push trigger on its own -
+      # the new months sat in the repo while the live display kept the old
+      # ones. workflow_dispatch is the one event GITHUB_TOKEN may still start.
+      - name: Deploy
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME"
 
       # Without this a broken source is invisible until the buffer runs out.
       - name: Report failure

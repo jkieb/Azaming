@@ -6,7 +6,7 @@
     <title>Azaming — Gebetszeiten Wien</title>
     <meta name="description" content="Gebetszeiten für Wien nach IGGÖ, mit Azan zur Gebetszeit." />
     <link rel="manifest" href="manifest.webmanifest" />
-    <meta name="theme-color" content="#0d1b1a" />
+    <meta name="theme-color" content="#0b1a20" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -17,6 +17,10 @@
     -->
     <div id="gate" class="gate">
       <div class="gate-inner">
+        <svg class="gate-star" viewBox="0 0 100 100" aria-hidden="true">
+          <path d="M50 6 94 50 50 94 6 50Z M18.9 18.9H81.1V81.1H18.9Z" />
+          <circle cx="50" cy="50" r="13" />
+        </svg>
         <h1>Azaming</h1>
         <p>Gebetszeiten für Wien nach IGGÖ</p>
         <button id="enable" class="enable" type="button">Azan aktivieren</button>
@@ -41,24 +45,33 @@
       </button>
 
       <header class="head">
-        <div class="head-left">
-          <div id="clock" class="clock">--:--<span id="seconds" class="seconds">:--</span></div>
-          <div id="date" class="date"></div>
-          <div id="hijri" class="hijri"></div>
-        </div>
-        <div class="head-right">
-          <div class="next-label">Nächstes Gebet</div>
-          <div id="next-name" class="next-name">—</div>
-          <div id="countdown" class="countdown">--:--:--</div>
+        <div id="clock" class="clock">--:--</div>
+        <div class="dates">
+          <span id="date" class="date"></span>
+          <span class="dot" aria-hidden="true"></span>
+          <span id="hijri" class="hijri"></span>
         </div>
       </header>
+
+      <!-- Arch-topped like a mihrab: the one panel meant to be read from the door. -->
+      <section class="hero" aria-live="polite">
+        <svg class="hero-star" viewBox="0 0 100 100" aria-hidden="true">
+          <path d="M50 6 94 50 50 94 6 50Z M18.9 18.9H81.1V81.1H18.9Z" />
+          <circle cx="50" cy="50" r="13" />
+        </svg>
+        <div class="next-label">Nächstes Gebet</div>
+        <div id="next-name" class="next-name">—</div>
+        <div class="next-when">
+          <span id="next-at" class="next-at"></span>
+          <span id="countdown" class="countdown">--</span>
+        </div>
+      </section>
 
       <section id="times" class="times" aria-label="Gebetszeiten heute"></section>
 
       <footer class="foot">
         <div id="status" class="status"></div>
         <div class="controls">
-          <button id="test" class="btn" type="button">Azan testen</button>
           <button id="settings-toggle" class="btn" type="button" aria-expanded="false">
             Einstellungen
           </button>
@@ -73,7 +86,10 @@
         <fieldset>
           <legend>Lautstärke</legend>
           <input id="volume" type="range" min="0" max="100" step="5" />
-          <output id="volume-out"></output>
+          <div class="volume-row">
+            <output id="volume-out"></output>
+            <button id="test" class="btn" type="button">Probe abspielen</button>
+          </div>
         </fieldset>
         <fieldset>
           <legend>Bildschirm</legend>

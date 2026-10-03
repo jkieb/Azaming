@@ -14,9 +14,12 @@ gate on the day it is set up — and remembers the answer, so every reload after
 that starts itself. On a phone with the screen locked no web app can play a full
 adhan; that needs a native wrapper, which this is not.
 
-- Clock, Gregorian and Hijri date, the day's six times, and a countdown to the
-  next prayer
-- Adhan at each prayer, per-prayer on/off, volume, and a test button
+- Clock (hours and minutes), Gregorian and Hijri date, the day's six times,
+  and the next prayer with its time and the minutes left
+- Calm dark theme on a faint eight-pointed star lattice, as in mosque
+  tilework, with the next prayer in an arch-topped panel
+- Adhan at each prayer, per-prayer on/off, volume, and a test play in the
+  settings
 - Screen Wake Lock so the display does not sleep
 - Works offline through a service worker once loaded
 
@@ -154,7 +157,9 @@ chime, and says so in the status bar.
 ### Deployment
 
 `.github/workflows/deploy.yml` publishes `public/` to GitHub Pages on every
-change, including the monthly data commit. Set *Settings → Pages → Source* to
+change. The monthly data commit is pushed with `GITHUB_TOKEN`, which GitHub
+does not let trigger other workflows, so `update-times.yml` starts the deploy
+itself via `workflow_dispatch` after pushing. Set *Settings → Pages → Source* to
 **GitHub Actions** once; there is nothing else to configure.
 
 ## Prayer time data
