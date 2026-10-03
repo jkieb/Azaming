@@ -97,9 +97,16 @@ const toSeconds = (hm) => {
 
 const two = (n) => String(n).padStart(2, '0');
 
+/**
+ * "in 2 Std. 14 Min." - whole minutes, rounded up, so the countdown never
+ * reads "in 0 Min." while the prayer is still ahead.
+ */
 function formatDuration(total) {
-  const s = Math.max(0, Math.floor(total));
-  return `${two(Math.floor(s / 3600))}:${two(Math.floor((s % 3600) / 60))}:${two(s % 60)}`;
+  const mins = Math.max(1, Math.ceil(total / 60));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (!h) return `in ${m} Min.`;
+  return m ? `in ${h} Std. ${m} Min.` : `in ${h} Std.`;
 }
 
 /** "2026-08-01" -> "2026-08-02", without touching the host timezone. */
@@ -922,8 +929,7 @@ function render() {
   retryWakeLock();
   el('alarm').hidden = audio.live();
 
-  el('clock').firstChild.nodeValue = `${two(now.h)}:${two(now.m)}`;
-  el('seconds').textContent = `:${two(now.s)}`;
+  el('clock').textContent = `${two(now.h)}:${two(now.m)}`;
 
   const rolledOver = now.date !== renderedDate;
   if (rolledOver) {
@@ -949,7 +955,10 @@ function render() {
 
   const next = findNext(today, now);
   el('next-name').textContent = next ? next.prayer.label : '—';
-  el('countdown').textContent = next ? formatDuration(next.in) : '--:--:--';
+  el('countdown').textContent = next ? formatDuration(next.in) : '--';
+  el('next-at').textContent = next
+    ? `um ${next.in < 86400 - now.sec ? today[next.prayer.key] : days.get(nextDate(now.date)).fajr}`
+    : '';
 
   for (const prayer of PRAYERS) {
     const slot = slots.get(prayer.key);

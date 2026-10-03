@@ -176,7 +176,8 @@ check('Duhr time rendered from the committed data', (await dhuhr.textContent()).
 check('next prayer is Duhr', (await page.textContent('#next-name')) === 'Duhr');
 
 const countdown = await page.textContent('#countdown');
-check('countdown counts down to Duhr', /^00:00:0[0-9]$/.test(countdown), countdown);
+check('countdown counts down to Duhr', countdown === 'in 1 Min.', countdown);
+check('next prayer shows its time', (await page.textContent('#next-at')) === 'um 13:06');
 
 check('Duhr is highlighted as next', await dhuhr.evaluate((n) => n.classList.contains('is-next')));
 
