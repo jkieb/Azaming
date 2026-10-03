@@ -885,10 +885,36 @@ function buildSettingsUi() {
   });
 }
 
-function setStatus(text, kind = '') {
+/** Takes one message or several parts, which are set apart by a small star. */
+function setStatus(parts, kind = '') {
   const node = el('status');
-  node.textContent = text;
+  // The spaces between parts are dropped by the flex layout but keep the text
+  // readable as words when copied or read aloud.
+  const spans = [parts]
+    .flat()
+    .filter(Boolean)
+    .map((text) => Object.assign(document.createElement('span'), { className: 'status-part', textContent: text }));
+  node.replaceChildren(...spans.flatMap((span, i) => (i ? [' ', span] : [span])));
   node.className = `status${kind ? ` is-${kind}` : ''}`;
+}
+
+const monthName = new Intl.DateTimeFormat('de-AT', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const dayName = new Intl.DateTimeFormat('de-AT', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+
+/** "wien-2026-12" -> "Dezember 2026" */
+function formatMonth(slug) {
+  const ym = /(\d{4})-(\d{2})$/.exec(slug ?? '');
+  return ym ? monthName.format(new Date(Date.UTC(+ym[1], +ym[2] - 1, 1))) : 'unbekannt';
+}
+
+/** "2026-08-01 13:06" -> "heute um 13:06" / "gestern um 13:06" / "am 1. August um 13:06" */
+function formatPlayed(stamp) {
+  const [date, time] = String(stamp).split(' ');
+  if (!time) return stamp;
+  const today = viennaNow().date;
+  if (date === today) return `heute um ${time}`;
+  if (nextDate(date) === today) return `gestern um ${time}`;
+  return `am ${dayName.format(new Date(`${date}T12:00:00Z`))} um ${time}`;
 }
 
 /**
@@ -1068,18 +1094,18 @@ function highlight(key) {
  * only shows up as silence at the next prayer has to be visible before then.
  */
 function showStatus() {
-  const latest = dataMeta.months?.at(-1) ?? '';
-  const source = `Quelle: IGGÖ (derislam.at) · Daten bis ${latest.slice(-7) || 'unbekannt'}`;
+  const source = 'Quelle: IGGÖ (derislam.at)';
+  const range = `Zeiten bis ${formatMonth(dataMeta.months?.at(-1))}`;
 
   // The morning after a silent prayer, this is the only question worth
   // answering, and it cannot be reconstructed from anything else on screen.
-  const last = audio.lastPlayed ? ` · Azan zuletzt ${audio.lastPlayed}` : ' · Azan noch nie gespielt';
+  const last = audio.lastPlayed ? `Azan zuletzt ${formatPlayed(audio.lastPlayed)}` : 'Azan noch nie gespielt';
 
   const live = audio.live();
   el('alarm').hidden = live;
 
   if (!live) {
-    setStatus(`Ton ist blockiert — bitte einmal auf die Seite tippen.${last}`, 'error');
+    setStatus(['Ton ist blockiert — bitte einmal auf die Seite tippen.', last], 'error');
     return;
   }
   if (dataProblem) {
@@ -1087,7 +1113,8 @@ function showStatus() {
     return;
   }
   // Only the regular adhan decides whether we are on the stand-in chime; a
-  // missing Fajr recording just means Fajr reuses the regular one.
+  // missing Fajr recording just means Fajr reuses the regular one, which is
+  // not worth a word on the wall.
   if (!audio.available.normal) {
     setStatus('Ersatzton aktiv — keine Azan-Aufnahme in public/audio/.', 'warn');
     return;
@@ -1097,10 +1124,9 @@ function showStatus() {
   // not notice a prayer, and by the time it wakes the moment has passed. So a
   // lock the system refused is said out loud rather than silently accepted.
   const asleep = settings.wakeLock && !screenHeld();
-  const wake = asleep ? ` · Bildschirmsperre aktiv — ${wakeLockProblem ?? 'noch nicht aktiv'}` : '';
+  const wake = asleep ? `Bildschirmsperre aktiv — ${wakeLockProblem ?? 'noch nicht aktiv'}` : '';
 
-  const fajr = audio.hasOwnFajr ? '' : ' · Fadjr nutzt die reguläre Aufnahme';
-  setStatus(`${source}${fajr}${wake}${last}`, asleep ? 'warn' : '');
+  setStatus([source, range, wake, last], asleep ? 'warn' : '');
 }
 
 async function start() {

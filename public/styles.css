@@ -419,8 +419,48 @@ body::after {
 }
 
 .status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0;
+  align-items: center;
   color: var(--ink-dim);
   font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+/* Parts set apart by the same small gold diamond as the date line. */
+.status-part + .status-part::before {
+  content: "";
+  display: inline-block;
+  width: 0.3rem;
+  height: 0.3rem;
+  margin: 0 0.75rem 0.15rem;
+  background: var(--gold-soft);
+  transform: rotate(45deg);
+  vertical-align: middle;
+}
+
+@media (max-width: 36rem) {
+  .foot {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .status {
+    flex-direction: column;
+  }
+
+  .status-part + .status-part::before {
+    display: none;
+  }
+}
+
+.volume-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.5rem;
 }
 
 .status.is-warn {

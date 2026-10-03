@@ -18,7 +18,8 @@ adhan; that needs a native wrapper, which this is not.
   and the next prayer with its time and the minutes left
 - Calm dark theme on a faint eight-pointed star lattice, as in mosque
   tilework, with the next prayer in an arch-topped panel
-- Adhan at each prayer, per-prayer on/off, volume, and a test button
+- Adhan at each prayer, per-prayer on/off, volume, and a test play in the
+  settings
 - Screen Wake Lock so the display does not sleep
 - Works offline through a service worker once loaded
 

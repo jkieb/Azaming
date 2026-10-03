@@ -72,7 +72,6 @@
       <footer class="foot">
         <div id="status" class="status"></div>
         <div class="controls">
-          <button id="test" class="btn" type="button">Azan testen</button>
           <button id="settings-toggle" class="btn" type="button" aria-expanded="false">
             Einstellungen
           </button>
@@ -87,7 +86,10 @@
         <fieldset>
           <legend>Lautstärke</legend>
           <input id="volume" type="range" min="0" max="100" step="5" />
-          <output id="volume-out"></output>
+          <div class="volume-row">
+            <output id="volume-out"></output>
+            <button id="test" class="btn" type="button">Probe abspielen</button>
+          </div>
         </fieldset>
         <fieldset>
           <legend>Bildschirm</legend>
