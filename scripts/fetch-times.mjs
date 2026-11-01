@@ -120,6 +120,9 @@ function parsePage(html, year, month) {
   const table = /<table[^>]*id="prayer-table"[\s\S]*?<\/table>/i.exec(html)?.[0];
   if (!table) throw new Error('prayer table not found on the page - markup changed?');
 
+  // Months the site has no data for (next year's January) render this message.
+  if (/Keine Gebetszeiten/i.test(table)) throw new NotPublished('the page has no times for this month');
+
   const records = [];
   for (const row of table.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
     const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => stripTags(m[1]));

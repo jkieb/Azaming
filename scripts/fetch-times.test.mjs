@@ -110,6 +110,11 @@ test('flags a month whose weekdays belong to another year as not published', () 
   assert.throws(() => parsePage(pageOf(2027, 1, { weekdayYear: 2026 }), 2027, 1), NotPublished);
 });
 
+test('treats the page\'s "no times" message as not published', () => {
+  const html = pageOf(2027, 1).replace(/<tbody>[\s\S]*<\/tbody>/, '<tbody><tr><td colspan="7">Keine Gebetszeiten für diesen Zeitraum verfügbar.</td></tr></tbody>');
+  assert.throws(() => parsePage(html, 2027, 1), NotPublished);
+});
+
 test('refuses a page that shows another place', () => {
   assert.throws(() => parsePage(pageOf(2026, 12, { place: 'graz' }), 2026, 12), /does not show Wien/);
 });
