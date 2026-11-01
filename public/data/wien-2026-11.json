@@ -2,8 +2,8 @@
  "place": "Wien",
  "timezone": "Europe/Vienna",
  "month": "2026-11",
- "source": "https://www.derislam.at/gebetszeiten",
- "fetchedAt": "2026-10-01T03:07:37.563Z",
+ "source": "https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/",
+ "fetchedAt": "2026-11-01T09:39:44.101Z",
  "days": [
   {
    "date": "2026-11-01",
