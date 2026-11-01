@@ -124,7 +124,8 @@ function parsePage(html, year, month) {
   for (const row of table.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
     const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => stripTags(m[1]));
     if (cells.length === 0) continue; // header row
-    const head = /^(\d{2})\.(\d{2})\.\s*(\w{2})$/.exec(cells[0]);
+    // Today's row carries an extra badge: '01.11. So heute'.
+    const head = /^(\d{2})\.(\d{2})\.\s*([A-Za-z]{2})(?:\s+\S+)*$/.exec(cells[0]);
     if (!head || cells.length !== 7) throw new Error(`unexpected table row: ${cells.join(' | ')}`);
     const [, dd, mm, wd] = head;
 

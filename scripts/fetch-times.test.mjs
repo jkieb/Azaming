@@ -101,6 +101,11 @@ test('parses the page into records the normaliser accepts', () => {
   assert.doesNotThrow(() => normalizeMonth(records, 2026, 12));
 });
 
+test("accepts today's row, which carries a 'heute' badge", () => {
+  const html = pageOf(2026, 12).replace('<span class="b">Di</span>', '<span class="b">Di</span> <span>heute</span>');
+  assert.equal(parsePage(html, 2026, 12)[0].date, '2026-12-01');
+});
+
 test('flags a month whose weekdays belong to another year as not published', () => {
   assert.throws(() => parsePage(pageOf(2027, 1, { weekdayYear: 2026 }), 2027, 1), NotPublished);
 });
