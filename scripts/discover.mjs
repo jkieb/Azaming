@@ -94,6 +94,17 @@ async function main() {
   if (dl.length === 0) log('(no direct pdf/csv/ics links in the initial DOM)');
   for (const l of dl) log(`  ${l.href}\n      "${l.text}"`);
 
+  section('ALL LINKS');
+  const seen = new Set();
+  for (const l of links) {
+    if (seen.has(l.href)) continue;
+    seen.add(l.href);
+    log(`  ${l.href}  "${l.text}"`);
+  }
+
+  section('BODY TEXT (first 1500 chars)');
+  log((await page.innerText('body').catch(() => '')).replace(/\s+/g, ' ').slice(0, 1500));
+
   section('FORM CONTROLS (city / month pickers)');
   const selects = await page.$$eval('select', (els) =>
     els.map((el) => ({
