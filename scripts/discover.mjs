@@ -105,6 +105,15 @@ async function main() {
   section('BODY TEXT (first 1500 chars)');
   log((await page.innerText('body').catch(() => '')).replace(/\s+/g, ' ').slice(0, 1500));
 
+  section('FORMS');
+  log(JSON.stringify(await page.$$eval('form', (fs) => fs.map((f) => ({ action: f.action, method: f.method, html: f.outerHTML.replace(/\s+/g, ' ').slice(0, 700) }))), null, 1));
+
+  section('TABLE HTML (first 2500 chars)');
+  log((await page.$eval('table', (t) => t.outerHTML).catch(() => '')).replace(/\s+/g, ' ').slice(0, 2500));
+
+  section('CAPTION / TEXT NEAR TABLE');
+  log((await page.innerText('main').catch(() => '')).replace(/\s+/g, ' ').slice(0, 3000));
+
   section('FORM CONTROLS (city / month pickers)');
   const selects = await page.$$eval('select', (els) =>
     els.map((el) => ({
@@ -127,7 +136,7 @@ async function main() {
 
   section('TABLES');
   const tables = await page.$$eval('table', (ts) =>
-    ts.map((t) => ({
+    ts.map((t) => ({ lastRows: [...t.querySelectorAll('tr')].slice(-2).map((tr) => [...tr.querySelectorAll('td,th')].map((c) => c.textContent.trim()).join(' | ')),
       headers: [...t.querySelectorAll('th')].map((th) => th.textContent.trim()).slice(0, 15),
       rows: t.querySelectorAll('tr').length,
       sample: [...t.querySelectorAll('tr')]
@@ -141,6 +150,7 @@ async function main() {
   tables.forEach((t, i) => {
     log(`  table #${i}: ${t.rows} rows, headers: ${t.headers.join(' | ') || '(none)'}`);
     t.sample.forEach((r) => log(`      ${r}`));
+    t.lastRows.forEach((r) => log(`   last: ${r}`));
   });
 
   section('IFRAMES');
