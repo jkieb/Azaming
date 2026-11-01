@@ -1,20 +1,22 @@
 /**
- * Pulls prayer times from the IGGOe Directus API into public/data/.
+ * Pulls prayer times from the IGGOe website into public/data/.
  *
  * Runs monthly (see .github/workflows/update-times.yml) and always fetches a
  * few months ahead, so a failed run - or two - never leaves the app without
  * data. Nothing is written unless it validates.
  *
- * The API is the same one derislam.at's own frontend calls. If it ever starts
- * refusing plain HTTP clients the way the main site does, --browser routes the
- * identical request through Chromium instead.
+ * Source: the IGGOe's "Einheitliche Islamische Gebetszeiten" page, which is
+ * server-rendered HTML - one table per place and month, picked with
+ * ?location=wien&month=12. (The Directus API this script used to read,
+ * directus.derislam.at, no longer resolves in DNS.) If the site ever starts
+ * refusing plain HTTP clients, --browser loads the same page in Chromium.
  */
 
 import { mkdir, writeFile, readdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-const API = 'https://directus.derislam.at/items/prayer_times';
+const PAGE = 'https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/';
 const PLACE = process.env.PLACE ?? 'Wien';
 const MONTHS_AHEAD = Number(process.env.MONTHS_AHEAD ?? 3);
 const OUT_DIR = 'public/data';
@@ -43,83 +45,113 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
 class FetchError extends Error {}
 
-function apiUrl(year, month) {
-  const filter = {
-    'month(date)': { _eq: month },
-    'year(date)': { _eq: year },
-    place: { _eq: PLACE },
-  };
-  const qs = new URLSearchParams();
-  qs.append('sort[]', 'date');
-  qs.append('fields[]', '*');
-  qs.append('filter', JSON.stringify(filter));
-  return `${API}?${qs}`;
+function pageUrl(month) {
+  const qs = new URLSearchParams({ location: locationSlug(), month: String(month) });
+  return `${PAGE}?${qs}`;
 }
 
+/** "Wien" -> "wien", the value of the page's <select name="location">. */
+const locationSlug = () => PLACE.toLowerCase().replace(/[^a-z]/g, '');
+
 /**
- * The API sits behind Cloudflare, which challenges requests that *claim* to be
- * a browser - a spoofed Chrome user-agent gets a 403 because the TLS
- * fingerprint gives it away, and so does any set of browser-ish headers.
- * Identifying honestly is what gets through (verified by scripts/probe-api.mjs),
- * so do not add accept-language or a browser user-agent here.
+ * The site used to challenge clients that claim to be a browser, so identify
+ * honestly rather than spoofing one.
  */
-const API_HEADERS = {
-  accept: 'application/json',
+const REQUEST_HEADERS = {
+  accept: 'text/html',
   'user-agent': 'Azaming/1.0 (+https://github.com/jkieb/Azaming)',
-  referer: 'https://www.derislam.at/gebetszeiten',
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Cloudflare tends to challenge the first request on a cold connection and let
- * later ones through unchanged - the same URL and headers that fail here
- * return 200 once the client has been talking to the host for a moment. So a
- * single 403 says nothing; only a run of them means we are actually refused.
- */
-async function getJson(url, attempts = 3) {
+/** Plain GET with a short retry; one failed request should not decide the run. */
+async function getHtml(url, attempts = 3) {
   let last;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const res = await fetch(url, { headers: API_HEADERS });
-    if (res.ok) return res.json();
-
-    const body = await res.text().catch(() => '');
-    const challenged = /just a moment/i.test(body);
-    last = new FetchError(
-      `HTTP ${res.status} for ${url}` + (challenged ? ' - blocked by a Cloudflare challenge' : ''),
-    );
-
+    try {
+      const res = await fetch(url, { headers: REQUEST_HEADERS });
+      if (res.ok) return await res.text();
+      last = new FetchError(`HTTP ${res.status} for ${url}`);
+    } catch (err) {
+      last = new FetchError(`${err.message}${err.cause ? ` (${err.cause.message ?? err.cause})` : ''} for ${url}`);
+    }
     if (attempt < attempts) {
-      console.log(`  attempt ${attempt}/${attempts}: HTTP ${res.status}${challenged ? ' (challenge)' : ''}, retrying`);
+      console.log(`  attempt ${attempt}/${attempts}: ${last.message}, retrying`);
       await sleep(1500 * attempt);
     }
   }
   throw last;
 }
 
-/** Fallback path: issue the same request from inside a real browser context. */
-async function getJsonViaBrowser(url) {
+/** Fallback path: load the same page in a real browser. */
+async function getHtmlViaBrowser(url) {
   const { chromium } = await import('playwright');
   const browser = await chromium.launch();
   try {
-    const ctx = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      locale: 'de-AT',
-    });
+    const ctx = await browser.newContext({ locale: 'de-AT' });
     const page = await ctx.newPage();
-    // Same-origin request from the site itself, so cookies and referer match.
-    await page.goto('https://www.derislam.at/gebetszeiten', { waitUntil: 'domcontentloaded' });
-    const body = await page.evaluate(async (u) => {
-      const r = await fetch(u, { headers: { accept: 'application/json' } });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.text();
-    }, url);
-    return JSON.parse(body);
+    const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    if (!res?.ok()) throw new FetchError(`HTTP ${res?.status()} for ${url}`);
+    return await page.content();
   } finally {
     await browser.close();
   }
 }
+
+const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const stripTags = (h) => h.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Reads the prayer table out of the page. The page only offers a month, not a
+ * year - it shows the current one - so the year is not taken on trust: each row
+ * carries a weekday ("Di"), and a month whose weekdays do not match the year we
+ * asked for is reported as not published yet instead of being stored under the
+ * wrong dates.
+ *
+ * Returns records shaped like the old API's, so normalizeMonth() is unchanged.
+ */
+function parsePage(html, year, month) {
+  const options = html.match(/<option[^>]*>/gi) ?? [];
+  const selected = options.find((o) => /\sselected\b/i.test(o));
+  if (!selected || !selected.includes(`value="${locationSlug()}"`)) {
+    throw new Error(`page does not show ${PLACE} as the selected place - markup changed?`);
+  }
+
+  const table = /<table[^>]*id="prayer-table"[\s\S]*?<\/table>/i.exec(html)?.[0];
+  if (!table) throw new Error('prayer table not found on the page - markup changed?');
+
+  // Months the site has no data for (next year's January) render this message.
+  if (/Keine Gebetszeiten/i.test(table)) throw new NotPublished('the page has no times for this month');
+
+  const records = [];
+  for (const row of table.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => stripTags(m[1]));
+    if (cells.length === 0) continue; // header row
+    // Today's row carries an extra badge: '01.11. So heute'.
+    const head = /^(\d{2})\.(\d{2})\.\s*([A-Za-z]{2})(?:\s+\S+)*$/.exec(cells[0]);
+    if (!head || cells.length !== 7) throw new Error(`unexpected table row: ${cells.join(' | ')}`);
+    const [, dd, mm, wd] = head;
+
+    const actual = WEEKDAYS[new Date(Date.UTC(year, +mm - 1, +dd)).getUTCDay()];
+    if (actual !== wd) {
+      throw new NotPublished(`${dd}.${mm}. is a ${wd} on the page but a ${actual} in ${year}`);
+    }
+    const [, fajr, shuruk, dhuhr, asr, maghrib, ishaa] = cells;
+    records.push({
+      date: `${year}-${mm}-${dd}`,
+      Fajr: fajr,
+      Shuruk: shuruk,
+      Dhuhr: dhuhr,
+      Asr: asr,
+      Maghrib: maghrib,
+      Ishaa: ishaa,
+    });
+  }
+  return records;
+}
+
+/** The page is up but does not hold this year's month - expected for next January. */
+class NotPublished extends Error {}
 
 /** Build {canonical -> apiKey} from a sample record, or explain what is missing. */
 function resolveFields(sample) {
@@ -138,7 +170,7 @@ function resolveFields(sample) {
     throw new Error(
       `Could not map API fields.\n  missing: ${missing.join('\n           ')}\n` +
         `  available: ${keys.join(', ')}\n` +
-        `  -> the API schema changed; update FIELD_ALIASES in scripts/fetch-times.mjs`,
+        `  -> the table columns changed; update FIELD_ALIASES in scripts/fetch-times.mjs`,
     );
   }
   return map;
@@ -234,14 +266,23 @@ async function main() {
   console.log(`transport=${USE_BROWSER ? 'chromium' : 'fetch'}\n`);
 
   const written = [];
-  for (const { year, month } of targets) {
-    const url = apiUrl(year, month);
-    const payload = USE_BROWSER ? await getJsonViaBrowser(url) : await getJson(url);
-    const records = payload.data ?? payload;
+  for (const [i, { year, month }] of targets.entries()) {
+    const url = pageUrl(month);
+    const html = USE_BROWSER ? await getHtmlViaBrowser(url) : await getHtml(url);
 
-    if (targets[0].year === year && targets[0].month === month && records[0]) {
-      console.log(`sample record: ${JSON.stringify(records[0])}\n`);
+    let records;
+    try {
+      records = parsePage(html, year, month);
+    } catch (err) {
+      // Later months may simply not be published yet; the first one must be.
+      if (err instanceof NotPublished && i > 0) {
+        console.log(`skip ${year}-${month}: not published yet (${err.message})`);
+        continue;
+      }
+      throw err;
     }
+
+    if (i === 0 && records[0]) console.log(`sample record: ${JSON.stringify(records[0])}\n`);
 
     const days = normalizeMonth(records, year, month);
     const slug = `${PLACE.toLowerCase().replace(/[^a-z]/g, '')}-${year}-${String(month).padStart(2, '0')}`;
@@ -254,7 +295,7 @@ async function main() {
           place: PLACE,
           timezone: TIMEZONE,
           month: `${year}-${String(month).padStart(2, '0')}`,
-          source: 'https://www.derislam.at/gebetszeiten',
+          source: PAGE,
           fetchedAt: new Date().toISOString(),
           days,
         },
@@ -281,13 +322,13 @@ async function main() {
   console.log(`\nindex: ${months.length} month(s) available`);
 }
 
-export { resolveFields, toHm, toIsoDate, validate, normalizeMonth, PRAYERS };
+export { resolveFields, toHm, toIsoDate, validate, normalizeMonth, parsePage, NotPublished, PRAYERS };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(`\nfetch-times failed: ${err.message}`);
     if (err instanceof FetchError && !USE_BROWSER) {
-      console.error('hint: the API refused a plain client - retry with --browser');
+      console.error('hint: the site refused a plain client - retry with --browser');
     }
     process.exit(1);
   });

@@ -164,20 +164,34 @@ itself via `workflow_dispatch` after pushing. Set *Settings → Pages → Source
 
 ## Prayer time data
 
-Times come from the IGGÖ (Islamische Glaubensgemeinschaft in Österreich) via
-[derislam.at/gebetszeiten](https://www.derislam.at/gebetszeiten). The site is a
-Directus frontend, so the times are available as JSON rather than having to be
-scraped out of markup:
+Times come from the IGGÖ (Islamische Glaubensgemeinschaft in Österreich), page
+[Aktuelle Gebetszeiten](https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/).
+It is server-rendered HTML with one table per place and month, selected by
+query string:
 
 ```
-https://directus.derislam.at/items/prayer_times
-  ?sort[]=date&fields[]=*
-  &filter={"month(date)":{"_eq":8},"year(date)":{"_eq":2026},"place":{"_eq":"Wien"}}
+https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/?location=wien&month=12
 ```
 
-`place` accepts Wien, Graz, Linz, Salzburg, Innsbruck, Klagenfurt, Bregenz,
-Eisenstadt and St.-Pölten. Times are local Vienna wall-clock and already
+`location` accepts wien, graz, linz, salzburg, innsbruck, klagenfurt, bregenz,
+eisenstadt and st-poelten. Times are local Vienna wall-clock and already
 account for daylight saving.
+
+The IGGÖ publishes them as *Einheitliche Islamische Gebetszeiten*, computed to
+the criteria of the international congress on unifying prayer times (Istanbul,
+26–27 Sept 2021). Their method page lists the offsets applied: Shuruq +7 min,
+Dhuhr +5 min, Maghrib +7 min, Fajr and Isha +0. So these are *not* the raw
+astronomical times other apps show.
+
+The page has a month selector but **no year**: it always shows the current
+year, and for months it has no data for it prints "Keine Gebetszeiten für diesen
+Zeitraum verfügbar". The fetch script therefore checks every row's weekday
+against the year it asked for, and skips (rather than mis-files) a month that
+is not published yet — normally next January, until it is January.
+
+The earlier source, a Directus API at `directus.derislam.at`, no longer exists
+(its hostname stopped resolving in DNS), which is what broke the November 2026
+refresh.
 
 ### The monthly job
 
@@ -191,21 +205,18 @@ and times in ascending order within each day. If validation fails the existing
 files stay untouched and an issue is filed, because a broken source would
 otherwise stay invisible until the buffer ran out.
 
-API column names (`fadjr`, `shuruk`, `duhr`, `assr`, `maghrib`, `ishaa`) are
-matched by alias rather than exact string, so a rename in the CMS fails loudly
-instead of writing nulls.
+Table columns are read by position and mapped through aliases, so a renamed
+column fails loudly instead of writing nulls. The page's "selected place" is
+checked too, so a layout change cannot silently store another city's times.
 
 ### Cloudflare
 
-The API sits behind Cloudflare, which challenges the first request on a cold
-connection. That is why `getJson` retries before giving up — a single 403 means
-nothing on its own. Two things that do **not** help, both verified with
-`scripts/probe-api.mjs`: a spoofed browser user-agent (403 — the TLS
-fingerprint contradicts it, so identifying honestly works better) and rewriting
-the `month(date)` filter (the query shape is not what gets refused).
-
-If plain HTTP ever stops working entirely, the job falls back to issuing the
-same request from a real Chromium.
+The site sits behind Cloudflare, which sometimes answers the first request on a
+cold connection with 403. That is why `getHtml` retries before giving up — a
+single 403 means nothing on its own. The client identifies honestly rather than
+spoofing a browser user-agent, which Cloudflare detects through the TLS
+fingerprint. If plain HTTP ever stops working entirely, the job falls back to
+loading the same page in a real Chromium.
 
 ### Data format
 
@@ -216,7 +227,7 @@ same request from a real Chromium.
   "place": "Wien",
   "timezone": "Europe/Vienna",
   "month": "2026-08",
-  "source": "https://www.derislam.at/gebetszeiten",
+  "source": "https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/",
   "fetchedAt": "2026-08-01T15:58:52.000Z",
   "days": [
     { "date": "2026-08-01", "fajr": "03:25", "sunrise": "05:23",
@@ -235,8 +246,7 @@ same request from a real Chromium.
 | `npm run smoke` | Drives the page in a browser on a controlled clock |
 | `npm run serve` | Serve `public/` locally |
 | `npm run fetch` | Pull months into `public/data/` (`--browser` to force Chromium) |
-| `node scripts/probe-api.mjs` | Which transports and query shapes the API accepts |
-| `npm run discover` | Re-inspect derislam.at if the API ever moves |
+| `npm run discover` | Re-inspect a derislam.at page (links, forms, tables) if the source moves again |
 
 `npm run smoke` fast-forwards a virtual clock to a prayer time and asserts the
 adhan fires — set `CHROMIUM_PATH` to reuse a Chromium you already have.

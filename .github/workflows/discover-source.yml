@@ -7,7 +7,7 @@ on:
     inputs:
       url:
         description: Page to probe
-        default: https://www.derislam.at/gebetszeiten
+        default: https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/
 
 jobs:
   discover:
@@ -25,7 +25,7 @@ jobs:
 
       - name: Probe source
         env:
-          TARGET_URL: ${{ inputs.url || 'https://www.derislam.at/gebetszeiten' }}
+          TARGET_URL: ${{ inputs.url || 'https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/' }}
         run: npm run discover
 
       - uses: actions/upload-artifact@v4
