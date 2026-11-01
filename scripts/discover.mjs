@@ -18,7 +18,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const TARGET = process.env.TARGET_URL ?? 'https://www.derislam.at/gebetszeiten';
+const TARGET = process.env.TARGET_URL ?? 'https://www.derislam.at/service/einheitliche-gebetszeiten/gebetszeiten/';
 const OUT = 'out';
 
 const DATA_EXT = /\.(pdf|csv|ics|xlsx?|json|txt)(\?|$)/i;
